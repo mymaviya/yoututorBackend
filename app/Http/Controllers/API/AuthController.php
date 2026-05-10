@@ -85,24 +85,21 @@ class AuthController extends Controller
 
     public function register(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $request->validate([
             'name' => 'required|string|min:3|max:50',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|min:6',
+            'confirm_password' => 'required|same:password',
 
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation error',
-                'errors' => $validator->errors()
-            ], 422);
-        }
+
 
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => bcrypt($request->password),
+            'role' => 'student',
 
         ]);
 
@@ -119,7 +116,7 @@ class AuthController extends Controller
                 'role' => $user->role,
                 'profile' => $user->profile ? asset('storage/' . $user->profile) : null
             ]
-        ]);
+        ],201);
     }
 
     public function currentUser(Request $request)
