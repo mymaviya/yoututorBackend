@@ -9,22 +9,69 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    // public function login(Request $request)
+    // {
+    //     $user = User::where('email', $request->email)->first();
+
+    //     if (!$user || !Hash::check($request->password, $user->password)) {
+    //         return response()->json(['message' => 'Invalid credentials'], 401);
+    //     }
+
+    //     $token = $user->createToken('auth_token')->plainTextToken;
+
+    //     return response()->json([
+    //         'token' => $token,
+    //         'user' => [
+    //             'id' => $user->id,
+    //             'name' => $user->name,
+    //             'email' => $user->email,
+    //             'contact' => $user->contact,
+    //             'address' => $user->address,
+    //             'role' => $user->role,
+    //             'profile' => $user->profile ? asset('storage/' . $user->profile) : null
+    //         ]
+    //     ]);
+    // }
+
     public function login(Request $request)
     {
-        $user = User::where('email', $request->email)->first();
+        $validated = $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string|min:6',
+            'remember' => 'nullable|boolean'
+            ]
+        );
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
-            return response()->json(['message' => 'Invalid credentials'], 401);
+        $user = User::where('email',$validated['email'])->first();
+
+        if (!$user ||!Hash::check($validated['password'],$user->password)) {
+
+            throw ValidationException::withMessages([
+
+                'email' => ['Invalid email or password.']
+            ]);
+        }
+
+        if ($request->remember) {
+
+            $user->remember_token = Str::random(60);
+
+            $user->save();
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
+            'success' => true,
+            'message' => 'Login successful',
             'token' => $token,
+            'remember_token' => $request->remember ? $user->remember_token : null,
             'user' => [
+
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
@@ -117,8 +164,6 @@ class AuthController extends Controller
             $path = $file->storeAs('profiles', $filename, 'public');
 
             $user->profile = $path;
-
-
         }
 
         $user->save();
