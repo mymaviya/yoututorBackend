@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\API\AuthController;
+use App\Http\Controllers\API\DashboardController;
 use App\Http\Controllers\API\StudentController;
 use App\Http\Controllers\API\GradeController;
 use App\Http\Controllers\API\SubjectController;
@@ -8,6 +9,9 @@ use App\Http\Controllers\API\LessonController;
 use App\Http\Controllers\API\QuestionController;
 use App\Http\Controllers\API\QuestionPaperController;
 use App\Http\Controllers\API\QuestionPaperPdfController;
+use App\Http\Controllers\API\TeacherController;
+use App\Http\Controllers\API\TeacherReportController;
+use App\Http\Controllers\API\TeacherQuestionTaskController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -41,6 +45,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Admin only
     Route::middleware('role:admin')->group(function () {
 
+        Route::get('dashboard', [DashboardController::class, 'index']);
+
         Route::apiResource('grades', GradeController::class);
         Route::apiResource('subjects', SubjectController::class);
         Route::apiResource('lessons', LessonController::class);
@@ -52,6 +58,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('papers/auto-generate', [QuestionPaperController::class, 'autoGenerate']);
         Route::get('question-papers/{id}/pdf',[QuestionPaperPdfController::class, 'download']);
 
+        Route::apiResource('teachers', TeacherController::class);
+        Route::get('/reports/teacher-question-paper-progress', [TeacherReportController::class,'questionPaperProgress']);
+
+        Route::apiResource('teacher-question-tasks',TeacherQuestionTaskController::class);
+
 
     });
 
@@ -59,6 +70,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:admin,teacher')->group(function () {
         Route::get('/subjects', [SubjectController::class, 'index']);
         Route::get('/lessons', [LessonController::class, 'index']);
+
+        Route::apiResource('question-papers', QuestionPaperController::class);
+
     });
 
     // Teacher

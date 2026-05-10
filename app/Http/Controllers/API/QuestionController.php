@@ -20,6 +20,7 @@ class QuestionController extends Controller
     public function index(Request $request)
     {
         $query = Question::with([
+            'creator',
             'grade',
             'subject',
             'lesson',
@@ -95,7 +96,8 @@ class QuestionController extends Controller
                 'marks' => $request->marks,
                 'answer' => $request->answer,
                 'explanation' => $request->explanation,
-                'question_image' => $questionImagePath
+                'question_image' => $questionImagePath,
+                'created_by' => auth()->id(),
             ]);
 
             /* OPTIONS (MCQ) */

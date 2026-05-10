@@ -14,7 +14,8 @@ class QuestionPaper extends Model
         'grade_id',
         'subject_id',
         'is_active',
-        'total_marks'
+        'total_marks',
+        'created_by'
     ];
 
     public function grade()
@@ -35,6 +36,11 @@ class QuestionPaper extends Model
     public function items()
     {
         return $this->hasMany(QuestionPaperItem::class);
+    }
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
     }
 
 

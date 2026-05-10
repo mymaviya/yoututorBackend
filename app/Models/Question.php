@@ -61,9 +61,9 @@ class Question extends Model
         return $this->hasMany(QuestionImage::class);
     }
 
-    // public function tags()
-    // {
-    //     return $this->hasMany(QuestionTag::class);
-    // }
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
 
 }

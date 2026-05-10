@@ -20,8 +20,8 @@ class QuestionPaperController extends Controller
             'subject',
             'questions.question'
         ])
-        ->latest()
-        ->paginate(10);
+            ->latest()
+            ->paginate(10);
     }
 
 
@@ -31,58 +31,67 @@ class QuestionPaperController extends Controller
 
 
 
-            $request->validate([
+        $request->validate([
 
-                'title' => 'required',
-                'exam_type' => 'required',
-                'duration' => 'required|numeric',
-                'grade_id' => 'required',
-                'subject_id' => 'required',
-                'instructions' => 'required|min:150',
-                'questions' => 'required|array|min:1',
-                'questions.*.section' => 'nullable|string',
-                'questions.*.instructions' => 'nullable|string'
-            ]);
+            'title' => 'required',
+            'exam_type' => 'required',
+            'duration' => 'required|numeric',
+            'grade_id' => 'required',
+            'subject_id' => 'required',
+            'instructions' => 'required|min:150',
+            'questions' => 'required|array|min:1',
+            'questions.*.section' => 'nullable|string',
+            'questions.*.instructions' => 'nullable|string'
+        ]);
 
+        if ($request->user()->role === 'teacher') {
+            $allowed = $request->user()->teacher
+                ->assignments()
+                ->where('grade_id', $request->grade_id)
+                ->where('subject_id', $request->subject_id)
+                ->exists();
 
-            $paper = QuestionPaper::create([
-
-                'title' => $request->title,
-                'exam_type' => $request->exam_type,
-                'duration' => $request->duration,
-                'instructions' => $request->instructions,
-                'grade_id' => $request->grade_id,
-                'subject_id' => $request->subject_id,
-
-                'total_marks' => collect(
-                    $request->questions
-                )->sum('marks')
-
-            ]);
-
-
-            foreach ($request->questions as $index => $item) {
-
-                QuestionPaperQuestion::create([
-
-                    'question_paper_id' => $paper->id,
-                    'question_id' => $item['question_id'],
-                    'marks' => $item['marks'],
-                    'sort_order' => $index + 1,
-                    'section' => $item['section'] ?? null,
-                    'instructions' => $item['instructions'] ?? null
-
-                    ]);
+            if (!$allowed) {
+                return response()->json([
+                    'message' => 'You are not assigned to this grade and subject.'
+                ], 403);
             }
+        }
 
-            DB::commit();
+        $paper = QuestionPaper::create([
 
-            return response()->json([
-                'message' => 'Question paper created successfully',
-                'data' => $paper->load(['questions.question'])
+            'title' => $request->title,
+            'exam_type' => $request->exam_type,
+            'duration' => $request->duration,
+            'instructions' => $request->instructions,
+            'grade_id' => $request->grade_id,
+            'subject_id' => $request->subject_id,
+            'total_marks' => collect($request->questions)->sum('marks'),
+            'created_by' => auth()->id(),
+
+        ]);
+
+
+        foreach ($request->questions as $index => $item) {
+
+            QuestionPaperQuestion::create([
+
+                'question_paper_id' => $paper->id,
+                'question_id' => $item['question_id'],
+                'marks' => $item['marks'],
+                'sort_order' => $index + 1,
+                'section' => $item['section'] ?? null,
+                'instructions' => $item['instructions'] ?? null
+
             ]);
+        }
 
+        DB::commit();
 
+        return response()->json([
+            'message' => 'Question paper created successfully',
+            'data' => $paper->load(['questions.question'])
+        ]);
     }
 
 
@@ -116,9 +125,8 @@ class QuestionPaperController extends Controller
                 'instructions' => $request->instructions,
                 'grade_id' => $request->grade_id,
                 'subject_id' => $request->subject_id,
-                'total_marks' => collect(
-                    $request->questions
-                )->sum('marks')
+                'total_marks' => collect($request->questions)->sum('marks'),
+                'created_by' => auth()->id(),
 
             ]);
 
@@ -149,7 +157,6 @@ class QuestionPaperController extends Controller
                     'questions.question'
                 ])
             ]);
-
         } catch (\Exception $e) {
 
             DB::rollback();
@@ -178,63 +185,61 @@ class QuestionPaperController extends Controller
     public function autoGenerate(Request $request)
     {
 
-            $request->validate([
-                'grade_id' => 'required',
-                'subject_id' => 'required',
-                'rules' => 'required|array'
-            ]);
+        $request->validate([
+            'grade_id' => 'required',
+            'subject_id' => 'required',
+            'rules' => 'required|array'
+        ]);
 
-            $selectedQuestions = collect();
+        $selectedQuestions = collect();
 
-            /* APPLY RULES */
+        /* APPLY RULES */
 
-            foreach ($request->rules as $rule) {
+        foreach ($request->rules as $rule) {
 
-                $query = Question::query()->where('grade_id',$request->grade_id)
-                    ->where('subject_id',$request->subject_id);
+            $query = Question::query()->where('grade_id', $request->grade_id)
+                ->where('subject_id', $request->subject_id);
 
-                /* OPTIONAL LESSON */
+            /* OPTIONAL LESSON */
 
-                if ($request->lesson_id) {
+            if ($request->lesson_id) {
 
-                    $query->where('lesson_id',$request->lesson_id);
-                }
-
-                /* TYPE */
-
-                if (!empty($rule['type'])) {
-                    $query->where(
-                        'type',
-                        $rule['type']
-                    );
-                }
-
-                /* DIFFICULTY */
-
-                if (!empty($rule['difficulty'])) {
-                    $query->where(
-                        'difficulty',
-                        $rule['difficulty']
-                    );
-                }
-
-                /* RANDOM QUESTIONS */
-
-                $questions = $query
-
-                    ->inRandomOrder()
-                    ->limit($rule['count'])
-                    ->get();
-
-                $selectedQuestions = $selectedQuestions->merge($questions);
+                $query->where('lesson_id', $request->lesson_id);
             }
 
-            /* UNIQUE QUESTIONS */
+            /* TYPE */
 
-            $selectedQuestions = $selectedQuestions->unique('id');
+            if (!empty($rule['type'])) {
+                $query->where(
+                    'type',
+                    $rule['type']
+                );
+            }
 
-            return response()->json($selectedQuestions->values());
+            /* DIFFICULTY */
 
+            if (!empty($rule['difficulty'])) {
+                $query->where(
+                    'difficulty',
+                    $rule['difficulty']
+                );
+            }
 
+            /* RANDOM QUESTIONS */
+
+            $questions = $query
+
+                ->inRandomOrder()
+                ->limit($rule['count'])
+                ->get();
+
+            $selectedQuestions = $selectedQuestions->merge($questions);
+        }
+
+        /* UNIQUE QUESTIONS */
+
+        $selectedQuestions = $selectedQuestions->unique('id');
+
+        return response()->json($selectedQuestions->values());
     }
 }
