@@ -8,9 +8,19 @@ class QuestionPaper extends Model
 {
     protected $fillable = [
         'title',
+        'exam_type',
+        'duration',
+        'instructions',
+        'grade_id',
         'subject_id',
-        'is_active'
+        'is_active',
+        'total_marks'
     ];
+
+    public function grade()
+    {
+        return $this->belongsTo(Grade::class, 'grade_id');
+    }
 
     public function subject()
     {
@@ -19,11 +29,14 @@ class QuestionPaper extends Model
 
     public function questions()
     {
-        return $this->hasMany(Question::class);
+       return $this->hasMany(QuestionPaperQuestion::class)->orderBy('sort_order');
     }
 
     public function items()
     {
         return $this->hasMany(QuestionPaperItem::class);
     }
+
+
+
 }

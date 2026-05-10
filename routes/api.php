@@ -6,6 +6,8 @@ use App\Http\Controllers\API\GradeController;
 use App\Http\Controllers\API\SubjectController;
 use App\Http\Controllers\API\LessonController;
 use App\Http\Controllers\API\QuestionController;
+use App\Http\Controllers\API\QuestionPaperController;
+use App\Http\Controllers\API\QuestionPaperPdfController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -43,9 +45,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('subjects', SubjectController::class);
         Route::apiResource('lessons', LessonController::class);
         Route::apiResource('questions', QuestionController::class);
+        Route::apiResource('question-papers', QuestionPaperController::class);
 
         Route::post('/grade_status/{id}', [GradeController::class, 'status']);
         Route::post('/subject_status/{id}', [SubjectController::class, 'status']);
+        Route::post('papers/auto-generate', [QuestionPaperController::class, 'autoGenerate']);
+        Route::get('question-papers/{id}/pdf',[QuestionPaperPdfController::class, 'download']);
+
+
     });
 
     // For dropdown access (teachers also)
