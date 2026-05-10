@@ -12,6 +12,7 @@ use App\Http\Controllers\API\QuestionPaperPdfController;
 use App\Http\Controllers\API\TeacherController;
 use App\Http\Controllers\API\TeacherReportController;
 use App\Http\Controllers\API\TeacherQuestionTaskController;
+use App\Http\Controllers\API\ProfileController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -23,6 +24,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
     Route::post('/logout', [AuthController::class, 'logout']);
+
+    Route::post('/profile/update', [ProfileController::class, 'update']);
+
     Route::post('/profile', [AuthController::class, 'update']);
 
 
