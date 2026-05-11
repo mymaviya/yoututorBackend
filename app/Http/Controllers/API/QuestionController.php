@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\Question;
 use App\Models\QuestionOption;
+use App\Models\TeacherQuestionTask;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,17 @@ class QuestionController extends Controller
             'options'
         ]);
 
+        if (auth()->user()->role !== 'admin') {
+            $query->where('created_by', auth()->id());
+        }
+
+        if ($request->filled('for_paper') && $request->for_paper == 1) {
+            $query->where('status', 'approved');
+        }
+
+        if ($request->status) {
+            $query->where('status', $request->status);
+        }
 
         if ($request->grade_id) {
             $query->where('grade_id', $request->grade_id);
@@ -63,77 +75,143 @@ class QuestionController extends Controller
 
 
 
-            $request->validate([
-                'grade_id' => 'required|exists:grades,id',
-                'subject_id' => 'required|exists:subjects,id',
-                'lesson_id' => 'required|exists:lessons,id',
-                'question' => 'required',
-                'type' => 'required',
-                'difficulty' => 'required',
-                'marks' => 'required|numeric',
-                'options' => 'nullable|array'
-            ]);
+        $request->validate([
+            'grade_id' => 'required|exists:grades,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'lesson_id' => 'required|exists:lessons,id',
+            'task_id' => 'nullable|exists:teacher_question_tasks,id',
+            'question' => 'required',
+            'type' => 'required',
+            'difficulty' => 'required',
+            'marks' => 'required|numeric',
+            'options' => 'nullable|array'
+        ]);
 
-            /* QUESTION IMAGE */
 
-            $questionImagePath = null;
+        // Restricted Teachers only to update thier assigned classes and Subjects
 
-            if ($request->hasFile('question_image')) {
+        if (auth()->user()->role === 'teacher') {
+            $allowed = auth()->user()
+                ->teacher
+                ->assignments()
+                ->where('grade_id', $request->grade_id)
+                ->where('subject_id', $request->subject_id)
+                ->exists();
 
-                $questionImagePath = $request->file('question_image')
-                    ->store('questions', 'public');
+            if (!$allowed) {
+                return response()->json([
+                    'message' => 'You are not assigned to this grade and subject.'
+                ], 403);
+            }
+        }
+
+        // Restricted Teachers only to add Number of Assinged questions in thier category
+
+        if (auth()->user()->role === 'teacher') {
+
+            $teacher = auth()->user()->teacher;
+
+            $taskQuery = TeacherQuestionTask::where('teacher_id', $teacher->id)
+                ->where('grade_id', $request->grade_id)
+                ->where('subject_id', $request->subject_id)
+                ->where('question_type', $request->type)
+                ->where('difficulty', $request->difficulty);
+
+            if ($request->filled('lesson_id')) {
+                $taskQuery->where(function ($q) use ($request) {
+                    $q->whereNull('lesson_id')
+                        ->orWhere('lesson_id', $request->lesson_id);
+                });
             }
 
-            /* CREATE QUESTION */
+            if ($request->filled('task_id')) {
+                $taskQuery->where('id', $request->task_id);
+            }
 
-            $question = Question::create([
-                'grade_id' => $request->grade_id,
-                'subject_id' => $request->subject_id,
-                'lesson_id' => $request->lesson_id,
-                'question' => $request->question,
-                'type' => $request->type,
-                'difficulty' => $request->difficulty,
-                'marks' => $request->marks,
-                'answer' => $request->answer,
-                'explanation' => $request->explanation,
-                'question_image' => $questionImagePath,
-                'created_by' => auth()->id(),
-            ]);
+            $task = $taskQuery->first();
 
-            /* OPTIONS (MCQ) */
+            if (!$task) {
+                return response()->json([
+                    'message' => 'No assigned task found for this grade, subject, type and difficulty.'
+                ], 403);
+            }
 
-            if ($request->options) {
+            $createdCount = Question::where('created_by', auth()->id())
+                ->where('grade_id', $task->grade_id)
+                ->where('subject_id', $task->subject_id)
+                ->when($task->lesson_id, function ($query) use ($task) {
+                    $query->where('lesson_id', $task->lesson_id);
+                })
+                ->where('type', $task->question_type)
+                ->where('difficulty', $task->difficulty)
+                ->count();
 
-                foreach ($request->options as $index => $opt) {
+            if ($createdCount >= $task->target_count) {
+                return response()->json([
+                    'message' => 'This task is already completed. You cannot add more questions for this task.'
+                ], 403);
+            }
+        }
 
-                    $optionImage = null;
+        /* QUESTION IMAGE */
 
-                    if ($request->hasFile("options.$index.option_image")) {
+        $questionImagePath = null;
 
-                        $optionImage = $request->file("options.$index.option_image")
-                            ->store('question-options', 'public');
-                    }
+        if ($request->hasFile('question_image')) {
 
-                    QuestionOption::create([
-                        'question_id' => $question->id,
+            $questionImagePath = $request->file('question_image')
+                ->store('questions', 'public');
+        }
 
-                        'option_text' => $opt['option_text'] ?? null,
+        /* CREATE QUESTION */
 
-                        'option_image' => $optionImage,
+        $question = Question::create([
+            'grade_id' => $request->grade_id,
+            'subject_id' => $request->subject_id,
+            'lesson_id' => $request->lesson_id,
+            'question' => $request->question,
+            'type' => $request->type,
+            'difficulty' => $request->difficulty,
+            'marks' => $request->marks,
+            'answer' => $request->answer,
+            'explanation' => $request->explanation,
+            'question_image' => $questionImagePath,
+            'created_by' => auth()->id(),
+            'status' => auth()->user()->role === 'admin' ? 'approved' : 'pending',
+        ]);
 
-                        'is_correct' => $opt['is_correct'] ?? false
-                    ]);
+        /* OPTIONS (MCQ) */
+
+        if ($request->options) {
+
+            foreach ($request->options as $index => $opt) {
+
+                $optionImage = null;
+
+                if ($request->hasFile("options.$index.option_image")) {
+
+                    $optionImage = $request->file("options.$index.option_image")
+                        ->store('question-options', 'public');
                 }
+
+                QuestionOption::create([
+                    'question_id' => $question->id,
+
+                    'option_text' => $opt['option_text'] ?? null,
+
+                    'option_image' => $optionImage,
+
+                    'is_correct' => $opt['is_correct'] ?? false
+                ]);
             }
+        }
 
-            DB::commit();
+        DB::commit();
 
-            return response()->json([
-                'message' => 'Question created successfully',
-                'data' => $question->load('options')
-            ]);
-
-
+        return response()->json([
+            'message' => 'Question created successfully',
+            'data' => $question->load('options')
+        ]);
     }
 
     /* SHOW SINGLE QUESTION */
@@ -158,6 +236,21 @@ class QuestionController extends Controller
 
             $question = Question::findOrFail($id);
 
+            if (auth()->user()->role === 'teacher') {
+                $allowed = auth()->user()
+                    ->teacher
+                    ->assignments()
+                    ->where('grade_id', $request->grade_id)
+                    ->where('subject_id', $request->subject_id)
+                    ->exists();
+
+                if (!$allowed) {
+                    return response()->json([
+                        'message' => 'You are not assigned to this grade and subject.'
+                    ], 403);
+                }
+            }
+
             /* UPDATE QUESTION IMAGE */
 
             if ($request->hasFile('question_image')) {
@@ -170,8 +263,16 @@ class QuestionController extends Controller
                     ->store('questions', 'public');
             }
 
-            /*UPDATE BASIC FIELDS*/
 
+            // update staus after rejection
+            if (auth()->user()->role !== 'admin' && $question->status === 'rejected') {
+                $question['status'] = 'pending';
+                $question['approved_by'] = null;
+                $question['approved_at'] = null;
+                $question['rejection_reason'] = null;
+            }
+
+            /*UPDATE BASIC FIELDS*/
             $question->update($request->only([
                 'grade_id',
                 'subject_id',
@@ -181,7 +282,11 @@ class QuestionController extends Controller
                 'difficulty',
                 'marks',
                 'answer',
-                'explanation'
+                'explanation',
+                'status',
+                'approved_by',
+                'approved_at',
+                'rejection_reason',
             ]));
 
             /*REPLACE OPTIONS*/
@@ -215,7 +320,6 @@ class QuestionController extends Controller
                 'message' => 'Question updated successfully',
                 'data' => $question->load('options')
             ]);
-
         } catch (\Exception $e) {
 
             DB::rollback();

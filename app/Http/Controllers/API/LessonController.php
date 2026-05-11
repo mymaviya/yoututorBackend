@@ -29,8 +29,9 @@ class LessonController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'title' => 'required',
-            'subject_id' => 'required|exists:subjects,id'
+            'grade_id' => 'required|exists:grades,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'title' => 'required|string'
         ]);
 
         return Lesson::create($request->all());
@@ -52,8 +53,9 @@ class LessonController extends Controller
         $lesson = Lesson::findOrFail($id);
 
         $request->validate([
-            'title' => 'required',
-            'subject_id' => 'required|exists:subjects,id'
+            'grade_id' => 'required|exists:grades,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'title' => 'required|string'
         ]);
 
         $lesson->update($request->all());

@@ -27,7 +27,11 @@ class Question extends Model
         'is_active',
         'is_featured',
 
-        'created_by'
+        'created_by',
+        'status',
+        'approved_by',
+        'approved_at',
+        'rejection_reason'
     ];
 
     /*
@@ -66,4 +70,8 @@ class Question extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function approver()
+    {
+        return $this->belongsTo(User::class, 'approved_by');
+    }
 }

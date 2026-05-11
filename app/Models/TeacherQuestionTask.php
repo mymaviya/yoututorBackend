@@ -10,6 +10,7 @@ class TeacherQuestionTask extends Model
         'teacher_id',
         'grade_id',
         'subject_id',
+        'lesson_id',
         'question_type',
         'difficulty',
         'target_count',
@@ -31,6 +32,11 @@ class TeacherQuestionTask extends Model
     public function subject()
     {
         return $this->belongsTo(Subject::class);
+    }
+
+    public function lesson()
+    {
+        return $this->belongsTo(Lesson::class);
     }
 
     public function assignedBy()

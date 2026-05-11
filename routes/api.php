@@ -1,8 +1,10 @@
 <?php
 
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+
 use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\DashboardController;
-use App\Http\Controllers\API\StudentController;
 use App\Http\Controllers\API\GradeController;
 use App\Http\Controllers\API\SubjectController;
 use App\Http\Controllers\API\LessonController;
@@ -12,24 +14,35 @@ use App\Http\Controllers\API\QuestionPaperPdfController;
 use App\Http\Controllers\API\TeacherController;
 use App\Http\Controllers\API\TeacherReportController;
 use App\Http\Controllers\API\TeacherQuestionTaskController;
+use App\Http\Controllers\API\TeacherDashboardController;
+use App\Http\Controllers\API\QuestionApprovalController;
 use App\Http\Controllers\API\ProfileController;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\API\StudentController;
+
+/*
+|--------------------------------------------------------------------------
+| PUBLIC ROUTES
+|--------------------------------------------------------------------------
+*/
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
-// Route::get('grades', [GradeController::class, 'index']);
+
+/*
+|--------------------------------------------------------------------------
+| AUTH ROUTES
+|--------------------------------------------------------------------------
+*/
 
 Route::middleware('auth:sanctum')->group(function () {
 
+    /*
+    |--------------------------------------------------------------------------
+    | AUTH USER
+    |--------------------------------------------------------------------------
+    */
 
     Route::post('/logout', [AuthController::class, 'logout']);
-
-    Route::post('/profile/update', [ProfileController::class, 'update']);
-
-    Route::post('/profile', [AuthController::class, 'update']);
-
-
 
     Route::get('/current-user', function (Request $request) {
 
@@ -42,50 +55,157 @@ Route::middleware('auth:sanctum')->group(function () {
             'contact' => $user->contact,
             'address' => $user->address,
             'role' => $user->role,
-            'profile' => $user->profile ? asset('storage/' . $user->profile) : null
+            'profile' => $user->profile
+                ? asset('storage/' . $user->profile)
+                : null,
         ]);
-     });
+    });
 
-    // Admin only
-    Route::middleware('role:admin')->group(function () {
+    /*
+    |--------------------------------------------------------------------------
+    | PROFILE
+    |--------------------------------------------------------------------------
+    */
 
-        Route::get('dashboard', [DashboardController::class, 'index']);
+    Route::post('/profile/update', [ProfileController::class, 'update']);
+    Route::post('/profile/change-password', [ProfileController::class, 'changePassword']);
 
-        Route::apiResource('grades', GradeController::class);
-        Route::apiResource('subjects', SubjectController::class);
-        Route::apiResource('lessons', LessonController::class);
+    /*
+    |--------------------------------------------------------------------------
+    | ADMIN + TEACHER COMMON ROUTES
+    |--------------------------------------------------------------------------
+    | Important: keep these before admin-only resource routes.
+    */
+
+    Route::middleware('role:admin,teacher')->group(function () {
+
+        Route::get('/grades', [GradeController::class, 'index']);
+        Route::get('/subjects', [SubjectController::class, 'index']);
+        Route::get('/lessons', [LessonController::class, 'index']);
         Route::apiResource('questions', QuestionController::class);
         Route::apiResource('question-papers', QuestionPaperController::class);
+        Route::post('/papers/auto-generate',[QuestionPaperController::class, 'autoGenerate']);
+        Route::get('/question-papers/{id}/pdf',[QuestionPaperPdfController::class, 'download']);
+        Route::get('/teacher/my-question-tasks',[TeacherQuestionTaskController::class, 'myTasks']);
+
+
+        Route::get('/my-assignments', function () {
+
+            $user = auth()->user();
+
+            if ($user->role === 'admin') {
+                return response()->json([
+                    'is_admin' => true,
+                    'grades' => [],
+                    'subjects' => [],
+                ]);
+            }
+
+            $teacher = $user->teacher;
+
+            if (!$teacher) {
+                return response()->json([
+                    'is_admin' => false,
+                    'grades' => [],
+                    'subjects' => [],
+                ]);
+            }
+
+            $assignments = $teacher
+                ->assignments()
+                ->with(['grade', 'subject'])
+                ->get();
+
+            return response()->json([
+                'is_admin' => false,
+
+                'grades' => $assignments
+                    ->pluck('grade')
+                    ->filter()
+                    ->unique('id')
+                    ->values(),
+
+                'subjects' => $assignments
+                    ->filter(fn ($a) => $a->subject)
+                    ->map(fn ($a) => [
+                        'id' => $a->subject->id,
+                        'name' => $a->subject->name,
+                        'grade_id' => $a->grade_id,
+                    ])
+                    ->values(),
+            ]);
+        });
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | ADMIN ONLY ROUTES
+    |--------------------------------------------------------------------------
+    */
+
+    Route::middleware('role:admin')->group(function () {
+
+        Route::get('/dashboard', [DashboardController::class, 'index']);
+
+        Route::apiResource('grades', GradeController::class)->except(['index']);
+        Route::apiResource('subjects', SubjectController::class)->except(['index']);
+        Route::apiResource('lessons', LessonController::class)->except(['index']);
 
         Route::post('/grade_status/{id}', [GradeController::class, 'status']);
         Route::post('/subject_status/{id}', [SubjectController::class, 'status']);
-        Route::post('papers/auto-generate', [QuestionPaperController::class, 'autoGenerate']);
-        Route::get('question-papers/{id}/pdf',[QuestionPaperPdfController::class, 'download']);
 
         Route::apiResource('teachers', TeacherController::class);
-        Route::get('/reports/teacher-question-paper-progress', [TeacherReportController::class,'questionPaperProgress']);
 
-        Route::apiResource('teacher-question-tasks',TeacherQuestionTaskController::class);
+        Route::apiResource(
+            'teacher-question-tasks',
+            TeacherQuestionTaskController::class
+        );
 
+        Route::get(
+            '/reports/teacher-question-paper-progress',
+            [TeacherReportController::class, 'questionPaperProgress']
+        );
 
+        Route::get(
+            '/question-approvals',
+            [QuestionApprovalController::class, 'index']
+        );
+
+        Route::post(
+            '/question-approvals/{question}/approve',
+            [QuestionApprovalController::class, 'approve']
+        );
+
+        Route::post(
+            '/question-approvals/{question}/reject',
+            [QuestionApprovalController::class, 'reject']
+        );
     });
 
-    // For dropdown access (teachers also)
-    Route::middleware('role:admin,teacher')->group(function () {
-        Route::get('/subjects', [SubjectController::class, 'index']);
-        Route::get('/lessons', [LessonController::class, 'index']);
+    /*
+    |--------------------------------------------------------------------------
+    | TEACHER ONLY ROUTES
+    |--------------------------------------------------------------------------
+    */
 
-        Route::apiResource('question-papers', QuestionPaperController::class);
-
-    });
-
-    // Teacher
     Route::middleware('role:teacher')->group(function () {
+
+        Route::get(
+            '/teacher/dashboard',
+            [TeacherDashboardController::class, 'index']
+        );
+
         Route::get('/students', [StudentController::class, 'index']);
     });
 
-    // Student
+    /*
+    |--------------------------------------------------------------------------
+    | STUDENT ONLY ROUTES
+    |--------------------------------------------------------------------------
+    */
+
     Route::middleware('role:student')->group(function () {
+
         Route::get('/profile', function (Request $request) {
             return $request->user();
         });
