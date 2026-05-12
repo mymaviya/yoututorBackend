@@ -98,12 +98,32 @@ class QuestionPaperController extends Controller
 
     public function show($id)
     {
-        return QuestionPaper::with([
+        $paper = QuestionPaper::with([
             'grade',
             'subject',
-            'questions.question.options'
-
+            'questions.question.options',
+            'questions.question.matchPairs',
         ])->findOrFail($id);
+
+        $paper->questions->transform(function ($paperQuestion) {
+
+            $question = $paperQuestion->question;
+
+            if ($question && $question->type === 'match_column') {
+
+                $question->left_column = $question->matchPairs
+                    ->shuffle()
+                    ->values();
+
+                $question->right_column = $question->matchPairs
+                    ->shuffle()
+                    ->values();
+            }
+
+            return $paperQuestion;
+        });
+
+        return response()->json($paper);
     }
 
 

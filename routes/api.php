@@ -18,6 +18,7 @@ use App\Http\Controllers\API\TeacherDashboardController;
 use App\Http\Controllers\API\QuestionApprovalController;
 use App\Http\Controllers\API\ProfileController;
 use App\Http\Controllers\API\StudentController;
+use App\Http\Controllers\API\NotificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -36,11 +37,7 @@ Route::post('/login', [AuthController::class, 'login']);
 
 Route::middleware('auth:sanctum')->group(function () {
 
-    /*
-    |--------------------------------------------------------------------------
-    | AUTH USER
-    |--------------------------------------------------------------------------
-    */
+    /* AUTH USER */
 
     Route::post('/logout', [AuthController::class, 'logout']);
 
@@ -61,14 +58,18 @@ Route::middleware('auth:sanctum')->group(function () {
         ]);
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | PROFILE
-    |--------------------------------------------------------------------------
-    */
+    /* PROFILE */
 
     Route::post('/profile/update', [ProfileController::class, 'update']);
     Route::post('/profile/change-password', [ProfileController::class, 'changePassword']);
+
+    // NOTIFICATION
+
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+
+    Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
 
     /*
     |--------------------------------------------------------------------------

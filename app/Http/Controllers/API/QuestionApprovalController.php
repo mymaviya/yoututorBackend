@@ -15,6 +15,7 @@ class QuestionApprovalController extends Controller
             'subject',
             'lesson',
             'options',
+            'matchPairs',
             'creator',
             'approver'
         ]);
@@ -57,6 +58,14 @@ class QuestionApprovalController extends Controller
             'rejection_reason' => null,
         ]);
 
+        notifyUser(
+            $question->created_by,
+            'Question Approved',
+            'Your question has been approved by admin.',
+            'question_approved',
+            '/questions'
+        );
+
         return response()->json([
             'message' => 'Question approved successfully',
             'data' => $question->load([
@@ -82,6 +91,14 @@ class QuestionApprovalController extends Controller
             'approved_at' => now(),
             'rejection_reason' => $data['rejection_reason'],
         ]);
+
+        notifyUser(
+            $question->created_by,
+            'Question Rejected',
+            $data['rejection_reason'],
+            'question_rejected',
+            '/questions'
+        );
 
         return response()->json([
             'message' => 'Question rejected successfully',

@@ -20,6 +20,7 @@ class Question extends Model
         'bloom_level',
 
         'marks',
+        'matches',
 
         'answer',
         'explanation',
@@ -32,6 +33,10 @@ class Question extends Model
         'approved_by',
         'approved_at',
         'rejection_reason'
+    ];
+
+    protected $casts = [
+        'matches' => 'array',
     ];
 
     /*
@@ -73,5 +78,10 @@ class Question extends Model
     public function approver()
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function matchPairs()
+    {
+        return $this->hasMany(QuestionMatchPair::class)->orderBy('sort_order');
     }
 }

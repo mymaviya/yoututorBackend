@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\Question;
 use App\Models\QuestionPaper;
 use App\Models\TeacherQuestionTask;
+use App\Models\QuestionMatchPair;
 
 class TeacherDashboardController extends Controller
 {
@@ -26,12 +27,29 @@ class TeacherDashboardController extends Controller
             ->latest()
             ->get()
             ->map(function ($task) use ($user) {
-                $created = Question::where('created_by', $user->id)
-                    ->where('grade_id', $task->grade_id)
-                    ->where('subject_id', $task->subject_id)
-                    ->where('type', $task->question_type)
-                    ->where('difficulty', $task->difficulty)
-                    ->count();
+
+                if ($task->question_type === 'match_column') {
+                    $created = QuestionMatchPair::whereHas('question', function ($q) use ($task, $user) {
+                        $q->where('created_by', $user->id)
+                            ->where('grade_id', $task->grade_id)
+                            ->where('subject_id', $task->subject_id)
+                            ->where('type', 'match_column')
+                            ->where('difficulty', $task->difficulty)
+                            ->when($task->lesson_id, function ($query) use ($task) {
+                                $query->where('lesson_id', $task->lesson_id);
+                            });
+                    })->count();
+                } else {
+                    $created = Question::where('created_by', $user->id)
+                        ->where('grade_id', $task->grade_id)
+                        ->where('subject_id', $task->subject_id)
+                        ->where('type', $task->question_type)
+                        ->where('difficulty', $task->difficulty)
+                        ->when($task->lesson_id, function ($query) use ($task) {
+                            $query->where('lesson_id', $task->lesson_id);
+                        })
+                        ->count();
+                }
 
                 return [
                     'id' => $task->id,

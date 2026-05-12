@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Question;
 use App\Models\QuestionOption;
 use App\Models\TeacherQuestionTask;
+use App\Models\QuestionMatchPair;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -21,12 +22,15 @@ class QuestionController extends Controller
     public function index(Request $request)
     {
         $query = Question::with([
-            'creator',
             'grade',
             'subject',
             'lesson',
-            'options'
+            'options',
+            'matchPairs',
+            'creator'
+
         ]);
+
 
         if (auth()->user()->role !== 'admin') {
             $query->where('created_by', auth()->id());
@@ -87,7 +91,6 @@ class QuestionController extends Controller
             'options' => 'nullable|array'
         ]);
 
-
         // Restricted Teachers only to update thier assigned classes and Subjects
 
         if (auth()->user()->role === 'teacher') {
@@ -146,9 +149,15 @@ class QuestionController extends Controller
                 ->where('difficulty', $task->difficulty)
                 ->count();
 
-            if ($createdCount >= $task->target_count) {
+            $newCount = 1;
+
+            if ($request->type === 'match_column' && $request->matches) {
+                $newCount = count(json_decode($request->matches, true) ?? []);
+            }
+
+            if (($createdCount + $newCount) > $task->target_count) {
                 return response()->json([
-                    'message' => 'This task is already completed. You cannot add more questions for this task.'
+                    'message' => "This task allows only {$task->target_count} questions. You have already created {$createdCount}. You can add only " . max($task->target_count - $createdCount, 0) . " more."
                 ], 403);
             }
         }
@@ -179,6 +188,22 @@ class QuestionController extends Controller
             'created_by' => auth()->id(),
             'status' => auth()->user()->role === 'admin' ? 'approved' : 'pending',
         ]);
+
+        // MATCH THE COLUMN
+
+        if ($request->type === 'match_column' && $request->matches) {
+            $question->matchPairs()->delete();
+
+            $matches = json_decode($request->matches, true);
+
+            foreach ($matches as $index => $pair) {
+                $question->matchPairs()->create([
+                    'left_text' => $pair['left'] ?? '',
+                    'right_text' => $pair['right'] ?? '',
+                    'sort_order' => $index + 1,
+                ]);
+            }
+        }
 
         /* OPTIONS (MCQ) */
 
@@ -222,7 +247,10 @@ class QuestionController extends Controller
             'grade',
             'subject',
             'lesson',
-            'options'
+            'options',
+            'matchPairs',
+            'creator',
+            'approver'
         ])->findOrFail($id);
     }
 
@@ -272,11 +300,14 @@ class QuestionController extends Controller
                 $question['rejection_reason'] = null;
             }
 
+            $question['matches'] = $request->matches ? json_decode($request->matches, true) : null;
+
             /*UPDATE BASIC FIELDS*/
             $question->update($request->only([
                 'grade_id',
                 'subject_id',
                 'lesson_id',
+                'matches',
                 'question',
                 'type',
                 'difficulty',
@@ -288,6 +319,22 @@ class QuestionController extends Controller
                 'approved_at',
                 'rejection_reason',
             ]));
+
+            // Update Match the Coloumn
+
+            if ($request->type === 'match_column' && $request->matches) {
+                $question->matchPairs()->delete();
+
+                $matches = json_decode($request->matches, true);
+
+                foreach ($matches as $index => $pair) {
+                    $question->matchPairs()->create([
+                        'left_text' => $pair['left'] ?? '',
+                        'right_text' => $pair['right'] ?? '',
+                        'sort_order' => $index + 1,
+                    ]);
+                }
+            }
 
             /*REPLACE OPTIONS*/
 
