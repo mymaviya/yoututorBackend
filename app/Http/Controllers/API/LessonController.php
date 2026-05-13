@@ -28,13 +28,28 @@ class LessonController extends Controller
      */
     public function store(Request $request)
     {
-        $request->validate([
+        $data = $request->validate([
             'grade_id' => 'required|exists:grades,id',
             'subject_id' => 'required|exists:subjects,id',
-            'title' => 'required|string'
+            'title' => 'required|string|max:255',
         ]);
 
-        return Lesson::create($request->all());
+        $exists = Lesson::where('subject_id', $data['subject_id'])
+            ->whereRaw('LOWER(title) = ?', [strtolower($data['title'])])
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'message' => 'This lesson already exists for the selected subject.',
+                'errors' => [
+                    'title' => ['This lesson already exists for the selected subject.']
+                ]
+            ], 422);
+        }
+
+        $lesson = Lesson::create($data);
+
+        return $lesson;
     }
 
     /**
@@ -52,15 +67,27 @@ class LessonController extends Controller
     {
         $lesson = Lesson::findOrFail($id);
 
-        $request->validate([
+        $data = $request->validate([
             'grade_id' => 'required|exists:grades,id',
             'subject_id' => 'required|exists:subjects,id',
-            'title' => 'required|string'
+            'title' => 'required|string|max:255',
         ]);
 
-        $lesson->update($request->all());
+        $exists = Lesson::where('subject_id', $data['subject_id'])
+            ->whereRaw('LOWER(title) = ?', [strtolower($data['title'])])
+            ->where('id', '!=', $lesson->id)
+            ->exists();
 
-        return $lesson;
+        if ($exists) {
+            return response()->json([
+                'message' => 'This lesson already exists for the selected subject.',
+                'errors' => [
+                    'title' => ['This lesson already exists for the selected subject.']
+                ]
+            ], 422);
+        }
+
+        $lesson->update($data);
     }
 
     /**

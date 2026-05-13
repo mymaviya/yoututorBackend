@@ -44,9 +44,23 @@ class GradeController extends Controller
      */
     public function store(Request $request)
     {
+
         $request->validate([
-            'name' => 'required|unique:grades,name'
+            'name' => 'required|string|max:255',
+            'stream' => 'nullable|string|max:255',
         ]);
+
+        $exists = Grade::where('name', $request->name)
+            ->where('stream', $request->stream)
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'errors' => [
+                    'name' => ['This grade and stream combination already exists.']
+                ]
+            ], 422);
+        }
 
         return Grade::create($request->all());
     }
@@ -67,8 +81,21 @@ class GradeController extends Controller
         $grade = Grade::findOrFail($id);
 
         $request->validate([
-            'name' => 'required|unique:grades,name,' . $grade->id
+            'name' => 'required|string|max:255',
+            'stream' => 'nullable|string|max:255',
         ]);
+
+        $exists = Grade::where('name', $request->name)
+            ->where('stream', $request->stream)
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'errors' => [
+                    'name' => ['This grade and stream combination already exists.']
+                ]
+            ], 422);
+        }
 
         $grade->update($request->all());
 

@@ -33,6 +33,21 @@ class SubjectController extends Controller
             'grade_id' => 'required|exists:grades,id'
         ]);
 
+        $exists = Subject::where('grade_id', $request->grade_id)
+            ->whereRaw('LOWER(name) = ?', [strtolower($request->name)])
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'message' => 'This subject already exists for the selected grade.',
+                'errors' => [
+                    'name' => [
+                        'This subject already exists for the selected grade.'
+                    ]
+                ]
+            ], 422);
+        }
+
         return Subject::create($request->all());
     }
 
@@ -55,6 +70,22 @@ class SubjectController extends Controller
             'name' => 'required',
             'grade_id' => 'required|exists:grades,id'
         ]);
+
+        $exists = Subject::where('grade_id', $request->grade_id)
+            ->whereRaw('LOWER(name) = ?', [strtolower($request->name)])
+            ->where('id', '!=', $subject->id)
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'message' => 'This subject already exists for the selected grade.',
+                'errors' => [
+                    'name' => [
+                        'This subject already exists for the selected grade.'
+                    ]
+                ]
+            ], 422);
+        }
 
         $subject->update($request->all());
 

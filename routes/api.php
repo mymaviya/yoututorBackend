@@ -19,6 +19,8 @@ use App\Http\Controllers\API\QuestionApprovalController;
 use App\Http\Controllers\API\ProfileController;
 use App\Http\Controllers\API\StudentController;
 use App\Http\Controllers\API\NotificationController;
+use App\Http\Controllers\API\ExamPortionController;
+use App\Http\Controllers\API\ExamNameController;
 
 /*
 |--------------------------------------------------------------------------
@@ -71,6 +73,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
 
+
+
     /*
     |--------------------------------------------------------------------------
     | ADMIN + TEACHER COMMON ROUTES
@@ -85,9 +89,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/lessons', [LessonController::class, 'index']);
         Route::apiResource('questions', QuestionController::class);
         Route::apiResource('question-papers', QuestionPaperController::class);
-        Route::post('/papers/auto-generate',[QuestionPaperController::class, 'autoGenerate']);
-        Route::get('/question-papers/{id}/pdf',[QuestionPaperPdfController::class, 'download']);
-        Route::get('/teacher/my-question-tasks',[TeacherQuestionTaskController::class, 'myTasks']);
+        Route::post('/papers/auto-generate', [QuestionPaperController::class, 'autoGenerate']);
+        Route::get('/question-papers/{id}/pdf', [QuestionPaperPdfController::class, 'download']);
+        Route::get('/teacher/my-question-tasks', [TeacherQuestionTaskController::class, 'myTasks']);
+
+        Route::get('/my-exam-portions', [ExamPortionController::class, 'myPortions']);
+        Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit']);
 
 
         Route::get('/my-assignments', function () {
@@ -127,8 +134,8 @@ Route::middleware('auth:sanctum')->group(function () {
                     ->values(),
 
                 'subjects' => $assignments
-                    ->filter(fn ($a) => $a->subject)
-                    ->map(fn ($a) => [
+                    ->filter(fn($a) => $a->subject)
+                    ->map(fn($a) => [
                         'id' => $a->subject->id,
                         'name' => $a->subject->name,
                         'grade_id' => $a->grade_id,
@@ -157,30 +164,19 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::apiResource('teachers', TeacherController::class);
 
-        Route::apiResource(
-            'teacher-question-tasks',
-            TeacherQuestionTaskController::class
-        );
+        Route::apiResource('teacher-question-tasks', TeacherQuestionTaskController::class);
 
-        Route::get(
-            '/reports/teacher-question-paper-progress',
-            [TeacherReportController::class, 'questionPaperProgress']
-        );
+        Route::get('/reports/teacher-question-paper-progress', [TeacherReportController::class, 'questionPaperProgress']);
+        Route::get('/question-approvals', [QuestionApprovalController::class, 'index']);
+        Route::post('/question-approvals/{question}/approve', [QuestionApprovalController::class, 'approve']);
+        Route::post('/question-approvals/{question}/reject', [QuestionApprovalController::class, 'reject']);
 
-        Route::get(
-            '/question-approvals',
-            [QuestionApprovalController::class, 'index']
-        );
+        Route::apiResource('exam-portions', ExamPortionController::class);
+        Route::post('/exam-portions/{examPortion}/approve', [ExamPortionController::class, 'approve']);
+        Route::post('/exam-portions/{examPortion}/reject', [ExamPortionController::class, 'reject']);
 
-        Route::post(
-            '/question-approvals/{question}/approve',
-            [QuestionApprovalController::class, 'approve']
-        );
-
-        Route::post(
-            '/question-approvals/{question}/reject',
-            [QuestionApprovalController::class, 'reject']
-        );
+        Route::apiResource('exam-names', ExamNameController::class);
+        Route::post('/exam-names/{examName}/status', [ExamNameController::class, 'status']);
     });
 
     /*
@@ -191,12 +187,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:teacher')->group(function () {
 
-        Route::get(
-            '/teacher/dashboard',
-            [TeacherDashboardController::class, 'index']
-        );
-
+        Route::get('/teacher/dashboard',[TeacherDashboardController::class, 'index']);
         Route::get('/students', [StudentController::class, 'index']);
+
     });
 
     /*

@@ -11,9 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('exam_portions', function (Blueprint $table) {
-            $table->id();
-            $table->timestamps();
+        Schema::table('exam_names', function (Blueprint $table) {
+            $table->date('tentative_date')->nullable()->after('name');
         });
     }
 
@@ -22,6 +21,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('exam_portions');
+        Schema::table('exam_names', function (Blueprint $table) {
+            //
+        });
     }
 };

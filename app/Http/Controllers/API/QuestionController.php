@@ -7,6 +7,7 @@ use App\Models\Question;
 use App\Models\QuestionOption;
 use App\Models\TeacherQuestionTask;
 use App\Models\QuestionMatchPair;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -232,6 +233,18 @@ class QuestionController extends Controller
         }
 
         DB::commit();
+
+        $admins = User::where('role', 'admin')->get();
+
+        foreach ($admins as $admin) {
+            notifyUser(
+                $admin->id,
+                'New Question Submitted',
+                auth()->user()->name . ' has submitted a question for approval.',
+                'question_submitted',
+                '/question-approvals'
+            );
+        }
 
         return response()->json([
             'message' => 'Question created successfully',
