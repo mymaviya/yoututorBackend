@@ -12,7 +12,7 @@ class TeacherQuestionTaskController extends Controller
 {
     public function index()
     {
-        return TeacherQuestionTask::with([
+        $tasks = TeacherQuestionTask::with([
             'teacher.user',
             'grade',
             'subject',
@@ -23,28 +23,13 @@ class TeacherQuestionTaskController extends Controller
             ->get()
             ->map(function ($task) {
 
-                if ($task->question_type === 'match_column') {
-                    $created = QuestionMatchPair::whereHas('question', function ($q) use ($task, $user) {
-                        $q->where('created_by', $user->id)
-                            ->where('grade_id', $task->grade_id)
-                            ->where('subject_id', $task->subject_id)
-                            ->where('type', 'match_column')
-                            ->where('difficulty', $task->difficulty)
-                            ->when($task->lesson_id, function ($query) use ($task) {
-                                $query->where('lesson_id', $task->lesson_id);
-                            });
-                    })->count();
-                } else {
-                    $created = Question::where('created_by', $user->id)
-                        ->where('grade_id', $task->grade_id)
-                        ->where('subject_id', $task->subject_id)
-                        ->where('type', $task->question_type)
-                        ->where('difficulty', $task->difficulty)
-                        ->when($task->lesson_id, function ($query) use ($task) {
-                            $query->where('lesson_id', $task->lesson_id);
-                        })
-                        ->count();
-                }
+                $user = $task->teacher?->user;
+
+                $created = $this->getCreatedCount($task, $user);
+
+                $progress = $task->target_count > 0
+                    ? min(round(($created / $task->target_count) * 100), 100)
+                    : 0;
 
                 return [
                     'id' => $task->id,
@@ -57,15 +42,45 @@ class TeacherQuestionTaskController extends Controller
                     'target_count' => $task->target_count,
                     'created_count' => $created,
                     'remaining_count' => max($task->target_count - $created, 0),
-                    'progress' => $task->target_count > 0
-                        ? round(($created / $task->target_count) * 100)
-                        : 0,
+                    'progress' => $progress,
                     'due_date' => $task->due_date,
                     'status' => $created >= $task->target_count
                         ? 'completed'
-                        : $task->status,
+                        : ($created > 0 ? 'in_progress' : 'pending'),
                 ];
             });
+
+        return response()->json($tasks);
+    }
+
+    private function getCreatedCount($task, $user)
+    {
+        if (!$user) {
+            return 0;
+        }
+
+        if ($task->question_type === 'match_column') {
+            return QuestionMatchPair::whereHas('question', function ($q) use ($task, $user) {
+                $q->where('created_by', $user->id)
+                    ->where('grade_id', $task->grade_id)
+                    ->where('subject_id', $task->subject_id)
+                    ->where('type', 'match_column')
+                    ->where('difficulty', $task->difficulty)
+                    ->when($task->lesson_id, function ($query) use ($task) {
+                        $query->where('lesson_id', $task->lesson_id);
+                    });
+            })->count();
+        }
+
+        return Question::where('created_by', $user->id)
+            ->where('grade_id', $task->grade_id)
+            ->where('subject_id', $task->subject_id)
+            ->where('type', $task->question_type)
+            ->where('difficulty', $task->difficulty)
+            ->when($task->lesson_id, function ($query) use ($task) {
+                $query->where('lesson_id', $task->lesson_id);
+            })
+            ->count();
     }
 
     public function myTasks()
@@ -91,26 +106,9 @@ class TeacherQuestionTaskController extends Controller
             ->map(function ($task) use ($user) {
 
                 if ($task->question_type === 'match_column') {
-                    $created = QuestionMatchPair::whereHas('question', function ($q) use ($task, $user) {
-                        $q->where('created_by', $user->id)
-                            ->where('grade_id', $task->grade_id)
-                            ->where('subject_id', $task->subject_id)
-                            ->where('type', 'match_column')
-                            ->where('difficulty', $task->difficulty)
-                            ->when($task->lesson_id, function ($query) use ($task) {
-                                $query->where('lesson_id', $task->lesson_id);
-                            });
-                    })->count();
+                    $created = $this->getCreatedCount($task, $user);
                 } else {
-                    $created = Question::where('created_by', $user->id)
-                        ->where('grade_id', $task->grade_id)
-                        ->where('subject_id', $task->subject_id)
-                        ->where('type', $task->question_type)
-                        ->where('difficulty', $task->difficulty)
-                        ->when($task->lesson_id, function ($query) use ($task) {
-                            $query->where('lesson_id', $task->lesson_id);
-                        })
-                        ->count();
+                    $created = $this->getCreatedCount($task, $user);
                 }
 
                 $progress = $task->target_count > 0
@@ -155,13 +153,10 @@ class TeacherQuestionTaskController extends Controller
             'due_date' => 'nullable|date'
         ]);
 
-        $data['assigned_by'] = auth()->id();
-
-        $createdTasks = [];
 
         foreach ($data['question_types'] as $type) {
 
-            $createdTasks[] = TeacherQuestionTask::create([
+            $task = TeacherQuestionTask::create([
                 'teacher_id' => $data['teacher_id'],
                 'grade_id' => $data['grade_id'],
                 'subject_id' => $data['subject_id'],
@@ -173,30 +168,33 @@ class TeacherQuestionTaskController extends Controller
                 'assigned_by' => auth()->id(),
                 'status' => 'pending',
             ]);
+
+            $task->load([
+                'teacher.user',
+                'grade',
+                'subject',
+                'lesson'
+            ]);
+
+            notifyUser(
+                $task->teacher->user_id,
+                'New Question Task Assigned',
+                'You have been assigned a new question creation task for '
+                    . $task->grade->name
+                    . ' - '
+                    . $task->subject->name
+                    . ' ('
+                    . strtoupper($task->question_type)
+                    . ')',
+                'task',
+                '/my-question-tasks'
+            );
         }
 
-        $task = TeacherQuestionTask::create($data);
-
-        notifyUser(
-            $task->teacher->user_id,
-            'New Question Task Assigned',
-            'You have been assigned a new question creation task for '
-                . $task->grade->name
-                . ' - '
-                . $task->subject->name
-                . ' ('
-                . strtoupper($task->question_type)
-                . ')',
-            'task',
-            '/my-question-tasks'
-        );
-
-        $createdTasks[] = $task;
-
         return response()->json([
-            'message' => 'Task assigned successfully',
+            'message' => 'Tasks assigned successfully',
             'data' => $task
-        ]);
+        ], 201);
     }
 
     public function update(Request $request, $id)

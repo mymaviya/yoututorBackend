@@ -33,12 +33,42 @@ class QuestionController extends Controller
         ]);
 
 
-        if (auth()->user()->role !== 'admin') {
+        $isForPaper = $request->filled('for_paper') && $request->for_paper == 1;
+
+        if (auth()->user()->role !== 'admin' && !$isForPaper) {
             $query->where('created_by', auth()->id());
         }
 
-        if ($request->filled('for_paper') && $request->for_paper == 1) {
+        if ($isForPaper) {
             $query->where('status', 'approved');
+
+            if (auth()->user()->role === 'teacher') {
+                $teacher = auth()->user()->teacher;
+
+                if (!$teacher) {
+                    return response()->json([
+                        'message' => 'Teacher profile not found.',
+                    ], 404);
+                }
+
+                $assignments = $teacher->assignments()
+                    ->select('grade_id', 'subject_id')
+                    ->get();
+
+                if ($assignments->isEmpty()) {
+                    $query->whereRaw('1 = 0');
+                } else {
+                    $query->where(function ($q) use ($assignments) {
+                        foreach ($assignments as $assignment) {
+                            $q->orWhere(function ($inner) use ($assignment) {
+                                $inner
+                                    ->where('grade_id', $assignment->grade_id)
+                                    ->where('subject_id', $assignment->subject_id);
+                            });
+                        }
+                    });
+                }
+            }
         }
 
         if ($request->status) {
@@ -69,7 +99,9 @@ class QuestionController extends Controller
             $query->where('question', 'like', '%' . $request->search . '%');
         }
 
-        return $query->latest()->paginate(10);
+        return $query
+            ->latest()
+            ->paginate((int) $request->input('per_page', 10));
     }
 
     /* STORE QUESTION */

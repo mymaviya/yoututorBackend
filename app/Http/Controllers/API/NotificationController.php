@@ -8,11 +8,16 @@ use Illuminate\Http\Request;
 
 class NotificationController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return AppNotification::where('user_id', auth()->id())
-            ->latest()
-            ->paginate(20);
+        $query = AppNotification::where('user_id', auth()->id())
+            ->latest();
+
+        if ($request->boolean('unread_only')) {
+            $query->where('is_read', false);
+        }
+
+        return $query->paginate(20);
     }
 
     public function unreadCount()

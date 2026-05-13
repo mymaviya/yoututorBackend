@@ -109,15 +109,31 @@ class QuestionPaperController extends Controller
 
             $question = $paperQuestion->question;
 
-            if ($question && $question->type === 'match_column') {
+            if ($question->type === 'match_column') {
 
                 $question->left_column = $question->matchPairs
                     ->shuffle()
-                    ->values();
+                    ->values()
+                    ->map(function ($pair, $index) {
+
+                        return [
+                            'id' => $pair->id,
+                            'label' => $index + 1,
+                            'text' => $pair->left_text,
+                        ];
+                    });
 
                 $question->right_column = $question->matchPairs
                     ->shuffle()
-                    ->values();
+                    ->values()
+                    ->map(function ($pair, $index) {
+
+                        return [
+                            'id' => $pair->id,
+                            'label' => chr(65 + $index),
+                            'text' => $pair->right_text,
+                        ];
+                    });
             }
 
             return $paperQuestion;

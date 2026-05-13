@@ -21,6 +21,7 @@ use App\Http\Controllers\API\StudentController;
 use App\Http\Controllers\API\NotificationController;
 use App\Http\Controllers\API\ExamPortionController;
 use App\Http\Controllers\API\ExamNameController;
+use App\Http\Controllers\API\PaperBlueprintController;
 
 /*
 |--------------------------------------------------------------------------
@@ -177,6 +178,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::apiResource('exam-names', ExamNameController::class);
         Route::post('/exam-names/{examName}/status', [ExamNameController::class, 'status']);
+
+        Route::apiResource('paper-blueprints', PaperBlueprintController::class);
+
+        Route::post('/paper-blueprints/{id}/status', [PaperBlueprintController::class,'status']);
     });
 
     /*

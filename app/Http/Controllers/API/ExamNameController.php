@@ -13,6 +13,11 @@ class ExamNameController extends Controller
         return ExamName::latest()->get();
     }
 
+    public function show(ExamName $examName)
+    {
+        return response()->json($examName);
+    }
+
     public function store(Request $request)
     {
         $data = $request->validate([

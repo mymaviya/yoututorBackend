@@ -89,6 +89,7 @@ class ExamPortionController extends Controller
             'teacher.user',
             'grade',
             'subject',
+            'examName',
             'lessons.lesson',
             'assignedBy',
             'approvedBy',
@@ -105,30 +106,22 @@ class ExamPortionController extends Controller
             'teacher_id' => 'required|exists:teachers,id',
             'grade_id' => 'required|exists:grades,id',
             'subject_id' => 'required|exists:subjects,id',
-            'exam_name' => 'required|string|max:255',
+            'exam_name_ids' => 'required|array|min:1',
+            'exam_name_ids.*' => 'exists:exam_names,id',
             'due_date' => 'nullable|date',
         ]);
 
-        $portion->update($data);
-
-        $portion->load(['examName', 'grade', 'subject', 'teacher.user']);
-
-        if ($portion->assigned_by) {
-            notifyUser(
-                $portion->assigned_by,
-                'Exam Syllabus Submitted',
-                $portion->teacher->user->name . ' has submitted syllabus for ' .
-                    $portion->examName->name . ' - ' .
-                    $portion->grade->name . ' - ' .
-                    $portion->subject->name,
-                'exam_portion_submitted',
-                '/exam-portions'
-            );
-        }
+        $portion->update([
+            'teacher_id' => $data['teacher_id'],
+            'grade_id' => $data['grade_id'],
+            'subject_id' => $data['subject_id'],
+            'exam_name_id' => $data['exam_name_ids'][0],
+            'due_date' => $data['due_date'] ?? null,
+        ]);
 
         return response()->json([
             'message' => 'Exam portion updated successfully',
-            'data' => $portion->load(['teacher.user', 'grade', 'subject']),
+            'data' => $portion->load(['teacher.user', 'grade', 'subject', 'examName']),
         ]);
     }
 
