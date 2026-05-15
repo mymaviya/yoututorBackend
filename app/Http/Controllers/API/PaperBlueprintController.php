@@ -143,6 +143,8 @@ class PaperBlueprintController extends Controller
                 'subject_id' => $data['subject_id'],
                 'exam_name_id' => $data['exam_name_id'] ?? null,
                 'title' => $data['title'],
+                'difficulty' => $data['difficulty'] ?? null,
+                'bloom_level' => $data['bloom_level'] ?? null,
                 'total_questions' => $totalQuestions,
                 'total_marks' => $totalMarks,
                 'is_active' => $data['is_active'] ?? true,
@@ -167,7 +169,9 @@ class PaperBlueprintController extends Controller
             'grade',
             'subject',
             'examName',
-            'sections',
+            'sections' => function ($q) {
+                $q->orderBy('sort_order');
+            },
         ])->findOrFail($id);
 
         $blueprint = $this->attachAvailability($blueprint);
@@ -195,6 +199,8 @@ class PaperBlueprintController extends Controller
                 'subject_id' => $data['subject_id'],
                 'exam_name_id' => $data['exam_name_id'] ?? null,
                 'title' => $data['title'],
+                'difficulty' => $data['difficulty'] ?? null,
+                'bloom_level' => $data['bloom_level'] ?? null,
                 'total_questions' => $totalQuestions,
                 'total_marks' => $totalMarks,
                 'is_active' => $data['is_active'] ?? true,
@@ -267,45 +273,74 @@ class PaperBlueprintController extends Controller
         });
 
         return response()->json($blueprints);
-
-
     }
 
 
-        private function availableQuestionCount($blueprint, $section)
-        {
-            return Question::where('status', 'approved')
-                ->where('grade_id', $blueprint->grade_id)
-                ->where('subject_id', $blueprint->subject_id)
-                ->where('type', $section->question_type)
-                ->when(!empty($section->difficulty), function ($q) use ($section) {
-                    $q->where('difficulty', $section->difficulty);
-                })
-                ->when(!empty($section->bloom_level), function ($q) use ($section) {
-                    $q->where('bloom_level', $section->bloom_level);
-                })
-                ->count();
-        }
-
-        private function attachAvailability($blueprint)
-        {
-            $blueprint->sections->transform(function ($section) use ($blueprint) {
-                $section->available_questions = $this->availableQuestionCount(
-                    $blueprint,
-                    $section
-                );
-
-                return $section;
-            });
-
-            $blueprint->available_questions_total = $blueprint->sections
-                ->sum('available_questions');
-
-            return $blueprint;
-        }
-
-
-
-
+    private function availableQuestionCount($blueprint, $section)
+    {
+        return Question::where('status', 'approved')
+            ->where('grade_id', $blueprint->grade_id)
+            ->where('subject_id', $blueprint->subject_id)
+            ->where('type', $section->question_type)
+            ->when(!empty($section->difficulty), function ($q) use ($section) {
+                $q->where('difficulty', $section->difficulty);
+            })
+            ->when(!empty($section->bloom_level), function ($q) use ($section) {
+                $q->where('bloom_level', $section->bloom_level);
+            })
+            ->count();
     }
 
+    private function attachAvailability(PaperBlueprint $blueprint): PaperBlueprint
+    {
+        $blueprint->sections->transform(function ($section) use ($blueprint) {
+            $section->available_questions = $this->availableQuestionCount(
+                $blueprint,
+                $section
+            );
+
+            return $section;
+        });
+
+        $blueprint->available_questions_total = $blueprint->sections
+            ->sum('available_questions');
+
+        return $this->formatBlueprintWithAvailability($blueprint);
+    }
+
+    private function formatBlueprintWithAvailability(PaperBlueprint $blueprint): PaperBlueprint
+    {
+        $blueprint->setRelation(
+            'sections',
+            $blueprint->sections
+                ->groupBy(function ($row) {
+                    $sortOrder = (int) $row->sort_order;
+
+                    return $sortOrder >= 100
+                        ? intdiv($sortOrder, 100)
+                        : $sortOrder;
+                })
+                ->values()
+                ->map(function ($rows) {
+                    $first = $rows->first();
+
+                    return [
+                        'id' => $first->id,
+                        'section_name' => $first->section_name,
+                        'instructions' => $first->instructions,
+                        'items' => $rows->values()->map(fn($row) => [
+                            'id' => $row->id,
+                            'question_type' => $row->question_type,
+                            'difficulty' => $row->difficulty,
+                            'bloom_level' => $row->bloom_level,
+                            'question_count' => $row->question_count,
+                            'marks_per_question' => $row->marks_per_question,
+                            'available_questions' => $row->available_questions ?? 0,
+                        ]),
+                    ];
+                })
+        );
+
+        return $blueprint;
+    }
+}

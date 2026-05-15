@@ -4,6 +4,7 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\QuestionPaper;
+use App\Models\PaperBlueprintSection;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 
@@ -14,14 +15,39 @@ class QuestionPaperPdfController extends Controller
         $paper = QuestionPaper::with([
             'grade',
             'subject',
-            'questions.question.options'
+            'questions' => function ($q) {
+                $q->with([
+                    'question.options',
+                    'question.matchPairs'
+                ])
+                    ->orderBy('section')
+                    ->orderBy('sort_order');
+            }
         ])->findOrFail($id);
+
+        foreach ($paper->questions as $paperQuestion) {
+            $questionType = $paperQuestion->question?->type;
+
+            $blueprintRow = PaperBlueprintSection::where('section_name', $paperQuestion->section)
+                ->where('question_type', $questionType)
+                ->where('marks_per_question', '>', 0)
+                ->first();
+
+            if ($blueprintRow) {
+                $paperQuestion->marks = $blueprintRow->marks_per_question;
+            }
+        }
+
+        $paper->total_marks = $paper->questions->sum('marks');
 
         $pdf = Pdf::loadView('pdf.question-paper', [
             'paper' => $paper
         ])->setPaper('a4', 'portrait');
 
-        $fileName = $paper->grade->name.'-'.$paper->subject->name.'-'.$paper->title;
+        $fileName =
+            $paper->grade->name . '-' .
+            $paper->subject->name . '-' .
+            $paper->title;
 
         return $pdf->download(
             str_replace(' ', '-', strtolower($fileName)) . '.pdf'
