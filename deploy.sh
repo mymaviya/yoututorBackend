@@ -10,7 +10,7 @@ echo "Pulling latest code..."
 git pull origin main
 
 echo "Installing PHP dependencies..."
-/opt/alt/php83/usr/bin/php /usr/local/bin/composercomposer install --no-dev --optimize-autoloader
+/opt/alt/php83/usr/bin/php /usr/local/bin/composer install --no-dev --optimize-autoloader
 
 echo "Running migrations..."
 /opt/alt/php83/usr/bin/php artisan migrate --force
