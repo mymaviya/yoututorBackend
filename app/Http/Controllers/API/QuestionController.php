@@ -99,6 +99,10 @@ class QuestionController extends Controller
             $query->where('question', 'like', '%' . $request->search . '%');
         }
 
+        if ($request->boolean('for_paper')) {
+            $query->where('status', 'approved');
+        }
+
         return $query
             ->latest()
             ->paginate((int) $request->input('per_page', 10));
