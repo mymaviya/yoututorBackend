@@ -22,6 +22,7 @@ use App\Http\Controllers\API\NotificationController;
 use App\Http\Controllers\API\ExamPortionController;
 use App\Http\Controllers\API\ExamNameController;
 use App\Http\Controllers\API\PaperBlueprintController;
+use App\Http\Controllers\API\AutoPaperGeneratorController;
 
 /*
 |--------------------------------------------------------------------------
@@ -96,6 +97,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/my-exam-portions', [ExamPortionController::class, 'myPortions']);
         Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit']);
+
+        Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generate' ]);
 
 
         Route::get('/my-assignments', function () {
@@ -178,6 +181,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::apiResource('exam-names', ExamNameController::class);
         Route::post('/exam-names/{examName}/status', [ExamNameController::class, 'status']);
+
+        Route::get('/paper-blueprints-dropdown', [PaperBlueprintController::class,'dropdown']);
 
         Route::apiResource('paper-blueprints', PaperBlueprintController::class);
 

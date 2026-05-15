@@ -4,6 +4,7 @@ namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
 use App\Models\PaperBlueprint;
+use App\Models\Question;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -115,6 +116,7 @@ class PaperBlueprintController extends Controller
             $query->where('is_active', $request->boolean('is_active'));
         }
 
+
         $blueprints = $query->paginate(20);
 
         $blueprints->getCollection()->transform(
@@ -161,10 +163,18 @@ class PaperBlueprintController extends Controller
 
     public function show($id)
     {
-        $blueprint = PaperBlueprint::with($this->relationships())->findOrFail($id);
+        $blueprint = PaperBlueprint::with([
+            'grade',
+            'subject',
+            'examName',
+            'sections',
+        ])->findOrFail($id);
 
-        return response()->json($this->formatBlueprint($blueprint));
+        $blueprint = $this->attachAvailability($blueprint);
+
+        return response()->json($blueprint);
     }
+
 
     public function update(Request $request, $id)
     {
@@ -227,4 +237,75 @@ class PaperBlueprintController extends Controller
             'data' => $blueprint,
         ]);
     }
-}
+
+    public function dropdown(Request $request)
+    {
+        $query = PaperBlueprint::with([
+            'grade',
+            'subject',
+            'examName',
+            'sections'
+        ])
+            ->where('is_active', true);
+
+        if ($request->filled('grade_id')) {
+            $query->where('grade_id', $request->grade_id);
+        }
+
+        if ($request->filled('subject_id')) {
+            $query->where('subject_id', $request->subject_id);
+        }
+
+        if ($request->filled('exam_name_id')) {
+            $query->where('exam_name_id', $request->exam_name_id);
+        }
+
+        $blueprints = $query->latest()->get();
+
+        $blueprints->transform(function ($blueprint) {
+            return $this->attachAvailability($blueprint);
+        });
+
+        return response()->json($blueprints);
+
+
+    }
+
+
+        private function availableQuestionCount($blueprint, $section)
+        {
+            return Question::where('status', 'approved')
+                ->where('grade_id', $blueprint->grade_id)
+                ->where('subject_id', $blueprint->subject_id)
+                ->where('type', $section->question_type)
+                ->when(!empty($section->difficulty), function ($q) use ($section) {
+                    $q->where('difficulty', $section->difficulty);
+                })
+                ->when(!empty($section->bloom_level), function ($q) use ($section) {
+                    $q->where('bloom_level', $section->bloom_level);
+                })
+                ->count();
+        }
+
+        private function attachAvailability($blueprint)
+        {
+            $blueprint->sections->transform(function ($section) use ($blueprint) {
+                $section->available_questions = $this->availableQuestionCount(
+                    $blueprint,
+                    $section
+                );
+
+                return $section;
+            });
+
+            $blueprint->available_questions_total = $blueprint->sections
+                ->sum('available_questions');
+
+            return $blueprint;
+        }
+
+
+
+
+    }
+
