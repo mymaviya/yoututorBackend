@@ -342,11 +342,11 @@ class QuestionController extends Controller
 
 
             // update staus after rejection
-            if (auth()->user()->role !== 'admin' && $question->status === 'rejected') {
-                $question['status'] = 'pending';
-                $question['approved_by'] = null;
-                $question['approved_at'] = null;
-                $question['rejection_reason'] = null;
+            if (auth()->user()->role === 'teacher') {
+                $data['status'] = 'pending';
+                $data['approved_by'] = null;
+                $data['approved_at'] = null;
+                $data['rejection_reason'] = null;
             }
 
             $question['matches'] = $request->matches ? json_decode($request->matches, true) : null;

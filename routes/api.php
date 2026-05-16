@@ -189,8 +189,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::post('/paper-blueprints/{id}/status', [PaperBlueprintController::class, 'status']);
 
-        Route::apiResource('question-types', QuestionTypeController::class);
         Route::post('/question-types/{questionType}/status', [QuestionTypeController::class, 'status']);
+        // QUESTION TYPE IMPORTS
+        Route::post('/question-types/import', [QuestionTypeController::class, 'import']);
+        Route::get('/question-types/template', [QuestionTypeController::class, 'downloadTemplate']);
+        Route::apiResource('question-types', QuestionTypeController::class);
+
     });
 
     /*

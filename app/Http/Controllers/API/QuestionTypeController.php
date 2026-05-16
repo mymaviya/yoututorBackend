@@ -3,6 +3,9 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
+use App\Imports\QuestionTypesImport;
+use App\Exports\QuestionTypesTemplateExport;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Models\QuestionType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -26,6 +29,30 @@ class QuestionTypeController extends Controller
         }
 
         return response()->json($query->get());
+    }
+
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
+
+        Excel::import(
+            new QuestionTypesImport,
+            $request->file('file')
+        );
+
+        return response()->json([
+            'message' => 'Question types imported successfully',
+        ]);
+    }
+
+    public function downloadTemplate()
+    {
+        return Excel::download(
+            new QuestionTypesTemplateExport,
+            'question-types-template.xlsx'
+        );
     }
 
     public function store(Request $request)
