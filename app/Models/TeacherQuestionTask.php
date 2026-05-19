@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class TeacherQuestionTask extends Model
 {
-     protected $fillable = [
+    protected $fillable = [
         'teacher_id',
         'grade_id',
         'subject_id',
@@ -42,5 +42,10 @@ class TeacherQuestionTask extends Model
     public function assignedBy()
     {
         return $this->belongsTo(User::class, 'assigned_by');
+    }
+
+    public function questionTypeData()
+    {
+        return $this->belongsTo(QuestionType::class,'question_type','slug');
     }
 }

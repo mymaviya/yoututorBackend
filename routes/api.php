@@ -189,6 +189,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::post('/paper-blueprints/{id}/status', [PaperBlueprintController::class, 'status']);
 
+        Route::post('/paper-blueprints/{id}/copy', [PaperBlueprintController::class, 'copy']);
+
         Route::post('/question-types/{questionType}/status', [QuestionTypeController::class, 'status']);
         // QUESTION TYPE IMPORTS
         Route::post('/question-types/import', [QuestionTypeController::class, 'import']);

@@ -2,6 +2,7 @@
 
 namespace App\Exports;
 
+use App\Models\Subject;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithHeadings;
@@ -12,6 +13,7 @@ class QuestionTypesTemplateExport implements FromArray, WithHeadings, ShouldAuto
     {
         return [
             'Grade',
+            'Stream',
             'Subject',
             'Question Type',
         ];
@@ -19,12 +21,16 @@ class QuestionTypesTemplateExport implements FromArray, WithHeadings, ShouldAuto
 
     public function array(): array
     {
-        return [
-            ['Class 1', 'English', 'MCQ'],
-            ['Class 1', 'English', 'Fill in the blanks'],
-            ['Class 2', 'English', 'Difficult Word'],
-            ['Class 2', 'English', 'Make Sentences'],
-            ['Class 2', 'English', 'MCQ'],
-        ];
+        return Subject::with('grade')
+            ->get()
+            ->map(function ($subject) {
+                return [
+                    $subject->grade?->name,
+                    $subject->grade?->stream ?? '',
+                    $subject->name,
+                    'MCQ',
+                ];
+            })
+            ->toArray();
     }
 }

@@ -17,6 +17,7 @@ class PaperBlueprintController extends Controller
             'subject',
             'examName',
             'sections',
+            'bloomLevels',
         ];
     }
 
@@ -38,6 +39,9 @@ class PaperBlueprintController extends Controller
             'sections.*.items.*.bloom_level' => 'nullable|string|max:255',
             'sections.*.items.*.question_count' => 'required|integer|min:1',
             'sections.*.items.*.marks_per_question' => 'required|numeric|min:0.5',
+            'bloom_levels' => 'nullable|array',
+            'bloom_levels.*.bloom_level' => 'required|string',
+            'bloom_levels.*.percentage' => 'required|numeric|min:0|max:100',
         ];
     }
 
@@ -130,6 +134,7 @@ class PaperBlueprintController extends Controller
     {
         $data = $request->validate($this->validationRules());
 
+
         return DB::transaction(function () use ($data) {
             $sections = $this->flattenSections($data['sections']);
             $totalQuestions = collect($sections)->sum('question_count');
@@ -149,6 +154,15 @@ class PaperBlueprintController extends Controller
                 'total_marks' => $totalMarks,
                 'is_active' => $data['is_active'] ?? true,
             ]);
+
+            $blueprint->bloomLevels()->delete();
+
+            foreach ($data['bloom_levels'] ?? [] as $item) {
+                $blueprint->bloomLevels()->create([
+                    'bloom_level' => $item['bloom_level'],
+                    'percentage' => $item['percentage'],
+                ]);
+            }
 
             foreach ($sections as $section) {
                 $blueprint->sections()->create($section);
@@ -208,6 +222,15 @@ class PaperBlueprintController extends Controller
 
             $blueprint->sections()->delete();
 
+            $blueprint->bloomLevels()->delete();
+
+            foreach ($data['bloom_levels'] ?? [] as $item) {
+                $blueprint->bloomLevels()->create([
+                    'bloom_level' => $item['bloom_level'],
+                    'percentage' => $item['percentage'],
+                ]);
+            }
+
             foreach ($sections as $section) {
                 $blueprint->sections()->create($section);
             }
@@ -218,6 +241,76 @@ class PaperBlueprintController extends Controller
                 'message' => 'Paper blueprint updated successfully',
                 'data' => $this->formatBlueprint($blueprint),
             ]);
+        });
+    }
+
+    public function copy(Request $request, $id)
+    {
+        $data = $request->validate([
+            'grade_id' => 'required|exists:grades,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'exam_name_id' => 'nullable|exists:exam_names,id',
+            'title' => 'required|string|max:255',
+        ]);
+
+        $source = PaperBlueprint::with([
+            'sections',
+            'bloomLevels',
+        ])->findOrFail($id);
+
+        $exists = PaperBlueprint::where('grade_id', $data['grade_id'])
+            ->where('subject_id', $data['subject_id'])
+            ->where('exam_name_id', $data['exam_name_id'] ?? null)
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'message' => 'A blueprint with same grade, subject, exam and title already exists.',
+                'errors' => [
+                    'title' => ['Duplicate blueprint found.']
+                ]
+            ], 422);
+        }
+
+        return DB::transaction(function () use ($source, $data) {
+            $newBlueprint = PaperBlueprint::create([
+                'grade_id' => $data['grade_id'],
+                'subject_id' => $data['subject_id'],
+                'exam_name_id' => $data['exam_name_id'] ?? null,
+                'title' => $data['title'],
+                'difficulty' => $source->difficulty,
+                'bloom_level' => $source->bloom_level,
+                'total_questions' => $source->total_questions,
+                'total_marks' => $source->total_marks,
+                'is_active' => true,
+            ]);
+
+            foreach ($source->sections as $section) {
+                $newBlueprint->sections()->create([
+                    'section_name' => $section->section_name,
+                    'instructions' => $section->instructions,
+                    'question_type' => $section->question_type,
+                    'difficulty' => $section->difficulty,
+                    'bloom_level' => $section->bloom_level,
+                    'question_count' => $section->question_count,
+                    'marks_per_question' => $section->marks_per_question,
+                    'sort_order' => $section->sort_order,
+                ]);
+            }
+
+            foreach ($source->bloomLevels as $level) {
+                $newBlueprint->bloomLevels()->create([
+                    'bloom_level' => $level->bloom_level,
+                    'percentage' => $level->percentage,
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Blueprint copied successfully',
+                'data' => $this->formatBlueprint(
+                    $newBlueprint->load($this->relationships())
+                ),
+            ], 201);
         });
     }
 

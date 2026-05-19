@@ -37,13 +37,15 @@ class QuestionTypeController extends Controller
             'file' => 'required|file|mimes:xlsx,xls,csv',
         ]);
 
-        Excel::import(
-            new QuestionTypesImport,
-            $request->file('file')
-        );
+        $import = new QuestionTypesImport();
+
+        Excel::import($import, $request->file('file'));
 
         return response()->json([
-            'message' => 'Question types imported successfully',
+            'message' => 'Question types import completed',
+            'imported' => $import->imported,
+            'skipped' => $import->skipped,
+            'errors' => $import->errors,
         ]);
     }
 

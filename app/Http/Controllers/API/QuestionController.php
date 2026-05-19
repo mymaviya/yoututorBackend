@@ -27,6 +27,7 @@ class QuestionController extends Controller
             'subject',
             'lesson',
             'options',
+            'questionType',
             'matchPairs',
             'creator'
 
@@ -124,6 +125,7 @@ class QuestionController extends Controller
             'question' => 'required',
             'type' => 'required',
             'difficulty' => 'required',
+            'bloom_level' => 'required',
             'marks' => 'required|numeric',
             'options' => 'nullable|array'
         ]);
@@ -218,6 +220,7 @@ class QuestionController extends Controller
             'question' => $request->question,
             'type' => $request->type,
             'difficulty' => $request->difficulty,
+            'bloom_level' => $request->bloom_level,
             'marks' => $request->marks,
             'answer' => $request->answer,
             'explanation' => $request->explanation,
@@ -303,6 +306,25 @@ class QuestionController extends Controller
         ])->findOrFail($id);
     }
 
+
+    public function import(Request $request)
+{
+    $request->validate([
+        'file' => 'required|file|mimes:xlsx,xls,csv',
+    ]);
+
+    $import = new QuestionTypesImport();
+
+    Excel::import($import, $request->file('file'));
+
+    return response()->json([
+        'message' => 'Question types import completed',
+        'imported' => $import->imported,
+        'skipped' => $import->skipped,
+        'errors' => $import->errors,
+    ]);
+}
+
     /* UPDATE QUESTION */
 
     public function update(Request $request, $id)
@@ -359,6 +381,7 @@ class QuestionController extends Controller
                 'matches',
                 'question',
                 'type',
+                'bloom_level',
                 'difficulty',
                 'marks',
                 'answer',

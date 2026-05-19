@@ -27,4 +27,17 @@ class QuestionType extends Model
     {
         return $this->belongsTo(Subject::class);
     }
+
+    public function questionType()
+    {
+        return $this->belongsTo(QuestionType::class, 'type', 'slug');
+    }
+
+    protected $appends = ['type_name'];
+
+    public function getTypeNameAttribute()
+    {
+        return $this->questionType?->name ?? $this->type;
+    }
+
 }

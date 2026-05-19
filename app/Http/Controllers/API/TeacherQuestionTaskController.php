@@ -17,6 +17,7 @@ class TeacherQuestionTaskController extends Controller
             'grade',
             'subject',
             'lesson',
+            'questionTypeData',
             'assignedBy'
         ])
             ->latest()
@@ -38,6 +39,8 @@ class TeacherQuestionTaskController extends Controller
                     'subject' => $task->subject,
                     'lesson' => $task->lesson,
                     'question_type' => $task->question_type,
+                    'question_type_data' => $task->questionTypeData,
+                    'question_type_name' => $task->questionTypeData?->name ?? $task->question_type,
                     'difficulty' => $task->difficulty,
                     'target_count' => $task->target_count,
                     'created_count' => $created,
@@ -150,7 +153,7 @@ class TeacherQuestionTaskController extends Controller
             'question_types.*' => 'required|string',
             'difficulty' => 'required|string',
             'target_count' => 'required|integer|min:1',
-            'due_date' => 'nullable|date'
+            'due_date' => 'required|date'
         ]);
 
 
@@ -209,7 +212,7 @@ class TeacherQuestionTaskController extends Controller
             'question_type' => 'required|string',
             'difficulty' => 'required|string',
             'target_count' => 'required|integer|min:1',
-            'due_date' => 'nullable|date',
+            'due_date' => 'required|date',
             'status' => 'nullable|string',
         ]);
 

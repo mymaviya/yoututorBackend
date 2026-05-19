@@ -39,4 +39,9 @@ class PaperBlueprint extends Model
     {
         return $this->hasMany(PaperBlueprintSection::class)->orderBy('sort_order');
     }
+
+    public function bloomLevels()
+    {
+        return $this->hasMany(PaperBlueprintBloomLevel::class,'paper_blueprint_id');
+    }
 }

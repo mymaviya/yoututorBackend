@@ -84,4 +84,16 @@ class Question extends Model
     {
         return $this->hasMany(QuestionMatchPair::class)->orderBy('sort_order');
     }
+
+    public function questionType()
+    {
+        return $this->belongsTo(QuestionType::class, 'type', 'slug');
+    }
+
+    protected $appends = ['type_name'];
+
+    public function getTypeNameAttribute()
+    {
+        return $this->questionType?->name ?? $this->type;
+    }
 }
