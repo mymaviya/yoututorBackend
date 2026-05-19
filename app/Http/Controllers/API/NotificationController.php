@@ -10,14 +10,30 @@ class NotificationController extends Controller
 {
     public function index(Request $request)
     {
-        $query = AppNotification::where('user_id', auth()->id())
-            ->latest();
+        $notifications = AppNotification::where('user_id', auth()->id())
+            ->latest()
+            ->get()
+            ->groupBy(function ($item) {
+                return $item->type . '|' . $item->url;
+            })
+            ->map(function ($group) {
+                $latest = $group->first();
 
-        if ($request->boolean('unread_only')) {
-            $query->where('is_read', false);
-        }
+                return [
+                    'id' => $latest->id,
+                    'title' => $latest->title,
+                    'message' => $latest->message,
+                    'type' => $latest->type,
+                    'url' => $latest->url,
+                    'is_read' => $group->every(fn($n) => $n->is_read),
+                    'count' => $group->count(),
+                    'created_at' => $latest->created_at,
+                    'ids' => $group->pluck('id')->values(),
+                ];
+            })
+            ->values();
 
-        return $query->paginate(20);
+        return response()->json($notifications);
     }
 
     public function unreadCount()
@@ -53,6 +69,22 @@ class NotificationController extends Controller
 
         return response()->json([
             'message' => 'All notifications marked as read'
+        ]);
+    }
+
+    public function markGroupRead(Request $request)
+    {
+        $data = $request->validate([
+            'ids' => 'required|array',
+            'ids.*' => 'exists:notifications,id',
+        ]);
+
+        AppNotification::where('user_id', auth()->id())
+            ->whereIn('id', $data['ids'])
+            ->update(['is_read' => true]);
+
+        return response()->json([
+            'message' => 'Notifications marked as read',
         ]);
     }
 }

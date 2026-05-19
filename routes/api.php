@@ -76,6 +76,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
 
+    Route::post('/notifications/mark-group-read', [NotificationController::class,'markGroupRead']);
+
 
 
     /*
@@ -100,7 +102,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit']);
 
         Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generate']);
-
 
         Route::get('/my-assignments', function () {
 
