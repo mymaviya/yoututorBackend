@@ -24,6 +24,7 @@ use App\Http\Controllers\API\ExamNameController;
 use App\Http\Controllers\API\PaperBlueprintController;
 use App\Http\Controllers\API\AutoPaperGeneratorController;
 use App\Http\Controllers\API\QuestionTypeController;
+use App\Http\Controllers\API\PaperGeneratorController;
 
 /*
 |--------------------------------------------------------------------------
@@ -102,6 +103,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit']);
 
         Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generate']);
+
+        Route::post('/paper-generator/preview', [PaperGeneratorController::class, 'preview']);
+        Route::post('/paper-generator/generate', [PaperGeneratorController::class,'generate']);
 
         Route::get('/my-assignments', function () {
 
@@ -184,16 +188,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('exam-names', ExamNameController::class);
         Route::post('/exam-names/{examName}/status', [ExamNameController::class, 'status']);
 
-        Route::get('/paper-blueprints-dropdown', [PaperBlueprintController::class, 'dropdown']);
 
+        Route::get('/paper-blueprints/dropdown', [PaperBlueprintController::class, 'dropdown']);
+        Route::post('/paper-blueprints/{id}/status', [PaperBlueprintController::class, 'status']);
+        Route::post('/paper-blueprints/{id}/copy', [PaperBlueprintController::class, 'copy']);
         Route::apiResource('paper-blueprints', PaperBlueprintController::class);
 
-        Route::post('/paper-blueprints/{id}/status', [PaperBlueprintController::class, 'status']);
-
-        Route::post('/paper-blueprints/{id}/copy', [PaperBlueprintController::class, 'copy']);
-
-        Route::post('/question-types/{questionType}/status', [QuestionTypeController::class, 'status']);
         // QUESTION TYPE IMPORTS
+        Route::post('/question-types/{questionType}/status', [QuestionTypeController::class, 'status']);
         Route::post('/question-types/import', [QuestionTypeController::class, 'import']);
         Route::get('/question-types/template', [QuestionTypeController::class, 'downloadTemplate']);
         Route::apiResource('question-types', QuestionTypeController::class);
