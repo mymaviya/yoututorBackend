@@ -35,7 +35,7 @@ class GradeController extends Controller
         // $perPage = $request->itemsPerPage ?? 10;
 
         // return $query->paginate($perPage);
-        $data = Grade::latest()->get();
+        $data = Grade::orderByRaw("CAST(REGEXP_SUBSTR(name, '[0-9]+') AS UNSIGNED)")->get();
         return response()->json($data);
     }
 

@@ -17,4 +17,15 @@ class Grade extends Model
         return $this->hasMany(Subject::class);
     }
 
+    protected static function booted()
+    {
+        static::addGlobalScope('sortByName', function ($query) {
+            $query->orderByRaw("
+            CAST(
+                REGEXP_SUBSTR(name, '[0-9]+')
+            AS UNSIGNED
+            )
+        ");
+        });
+    }
 }
