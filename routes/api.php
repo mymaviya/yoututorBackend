@@ -25,6 +25,7 @@ use App\Http\Controllers\API\PaperBlueprintController;
 use App\Http\Controllers\API\AutoPaperGeneratorController;
 use App\Http\Controllers\API\QuestionTypeController;
 use App\Http\Controllers\API\PaperGeneratorController;
+use App\Http\Controllers\API\LanguageQuestionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -81,6 +82,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
 
 
+
+
     /*
     |--------------------------------------------------------------------------
     | ADMIN + TEACHER COMMON ROUTES
@@ -93,6 +96,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/grades', [GradeController::class, 'index']);
         Route::get('/subjects', [SubjectController::class, 'index']);
         Route::get('/lessons', [LessonController::class, 'index']);
+
+        Route::get('/question-types', [QuestionTypeController::class, 'index']);
+
         Route::apiResource('questions', QuestionController::class);
         Route::apiResource('question-papers', QuestionPaperController::class);
         Route::post('/papers/auto-generate', [QuestionPaperController::class, 'autoGenerate']);
@@ -199,6 +205,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/question-types/import', [QuestionTypeController::class, 'import']);
         Route::get('/question-types/template', [QuestionTypeController::class, 'downloadTemplate']);
         Route::apiResource('question-types', QuestionTypeController::class);
+
+        Route::get('/language-questions/group', [LanguageQuestionController::class, 'group']);
 
     });
 

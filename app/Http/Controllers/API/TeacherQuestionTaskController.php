@@ -62,6 +62,12 @@ class TeacherQuestionTaskController extends Controller
             return 0;
         }
 
+        $contentBasedTypes = [
+            'word_meaning',
+            'make_sentence',
+            'difficult_words',
+        ];
+
         if ($task->question_type === 'match_column') {
             return QuestionMatchPair::whereHas('question', function ($q) use ($task, $user) {
                 $q->where('created_by', $user->id)
@@ -73,6 +79,20 @@ class TeacherQuestionTaskController extends Controller
                         $query->where('lesson_id', $task->lesson_id);
                     });
             })->count();
+        }
+
+        if (in_array($task->question_type, $contentBasedTypes)) {
+            return Question::withCount('languageItems')
+                ->where('created_by', $user->id)
+                ->where('grade_id', $task->grade_id)
+                ->where('subject_id', $task->subject_id)
+                ->where('type', $task->question_type)
+                ->where('difficulty', $task->difficulty)
+                ->when($task->lesson_id, function ($query) use ($task) {
+                    $query->where('lesson_id', $task->lesson_id);
+                })
+                ->get()
+                ->sum('language_items_count');
         }
 
         return Question::where('created_by', $user->id)

@@ -7,6 +7,8 @@ use App\Models\Question;
 use App\Models\QuestionOption;
 use App\Models\TeacherQuestionTask;
 use App\Models\QuestionMatchPair;
+use App\Imports\QuestionTypesImport;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -28,6 +30,7 @@ class QuestionController extends Controller
             'lesson',
             'options',
             'questionType',
+            'languageItems',
             'matchPairs',
             'creator'
 
@@ -71,6 +74,8 @@ class QuestionController extends Controller
                 }
             }
         }
+
+
 
         if ($request->status) {
             $query->where('status', $request->status);
@@ -199,6 +204,8 @@ class QuestionController extends Controller
                     'message' => "This task allows only {$task->target_count} questions. You have already created {$createdCount}. You can add only " . max($task->target_count - $createdCount, 0) . " more."
                 ], 403);
             }
+
+
         }
 
         /* QUESTION IMAGE */
@@ -228,6 +235,31 @@ class QuestionController extends Controller
             'created_by' => auth()->id(),
             'status' => auth()->user()->role === 'admin' ? 'approved' : 'pending',
         ]);
+
+        $contentBasedTypes = [
+            'word_meaning',
+            'make_sentence',
+            'difficult_words',
+        ];
+
+        if (in_array($request->type, $contentBasedTypes)) {
+            $items = json_decode($request->content_items, true) ?? [];
+
+            foreach ($items as $item) {
+                if (empty($item['word'])) {
+                    continue;
+                }
+
+                $question->languageItems()->create([
+                    'word' => $item['word'],
+                    'answer' => $item['meaning']
+                        ?? $item['sentence']
+                        ?? $item['answer']
+                        ?? null,
+                ]);
+            }
+        }
+
 
         // MATCH THE COLUMN
 
@@ -301,6 +333,8 @@ class QuestionController extends Controller
             'lesson',
             'options',
             'matchPairs',
+            'questionType',
+            'languageItems',
             'creator',
             'approver'
         ])->findOrFail($id);
@@ -308,22 +342,22 @@ class QuestionController extends Controller
 
 
     public function import(Request $request)
-{
-    $request->validate([
-        'file' => 'required|file|mimes:xlsx,xls,csv',
-    ]);
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
 
-    $import = new QuestionTypesImport();
+        $import = new QuestionTypesImport();
 
-    Excel::import($import, $request->file('file'));
+        Excel::import($import, $request->file('file'));
 
-    return response()->json([
-        'message' => 'Question types import completed',
-        'imported' => $import->imported,
-        'skipped' => $import->skipped,
-        'errors' => $import->errors,
-    ]);
-}
+        return response()->json([
+            'message' => 'Question types import completed',
+            'imported' => $import->imported,
+            'skipped' => $import->skipped,
+            'errors' => $import->errors,
+        ]);
+    }
 
     /* UPDATE QUESTION */
 
@@ -429,6 +463,32 @@ class QuestionController extends Controller
                         'option_text' => $opt['option_text'] ?? null,
                         'option_image' => $optionImage,
                         'is_correct' => $opt['is_correct'] ?? false
+                    ]);
+                }
+            }
+
+            $contentBasedTypes = [
+                'word_meaning',
+                'make_sentence',
+                'difficult_words',
+            ];
+
+            if (in_array($request->type, $contentBasedTypes)) {
+                $items = json_decode($request->content_items, true) ?? [];
+
+                $question->languageItems()->delete();
+
+                foreach ($items as $item) {
+                    if (empty($item['word'])) {
+                        continue;
+                    }
+
+                    $question->languageItems()->create([
+                        'word' => $item['word'],
+                        'answer' => $item['meaning']
+                            ?? $item['sentence']
+                            ?? $item['answer']
+                            ?? null,
                     ]);
                 }
             }

@@ -16,6 +16,8 @@ class QuestionApprovalController extends Controller
             'lesson',
             'options',
             'matchPairs',
+            'questionType',
+            'languageItems',
             'creator',
             'approver'
         ]);

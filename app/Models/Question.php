@@ -90,6 +90,11 @@ class Question extends Model
         return $this->belongsTo(QuestionType::class, 'type', 'slug');
     }
 
+    public function languageItems()
+    {
+        return $this->hasMany(LanguageQuestion::class);
+    }
+
     protected $appends = ['type_name'];
 
     public function getTypeNameAttribute()
