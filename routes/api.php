@@ -26,6 +26,7 @@ use App\Http\Controllers\API\AutoPaperGeneratorController;
 use App\Http\Controllers\API\QuestionTypeController;
 use App\Http\Controllers\API\PaperGeneratorController;
 use App\Http\Controllers\API\LanguageQuestionController;
+use App\Http\Controllers\API\TeacherAnalyticsController;
 
 /*
 |--------------------------------------------------------------------------
@@ -207,6 +208,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('question-types', QuestionTypeController::class);
 
         Route::get('/language-questions/group', [LanguageQuestionController::class, 'group']);
+        Route::get('/teacher-analytics', [TeacherAnalyticsController::class, 'index']);
 
     });
 
