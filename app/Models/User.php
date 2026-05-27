@@ -56,4 +56,33 @@ class User extends Authenticatable
     {
         return $this->hasOne(Teacher::class);
     }
+
+    public function role()
+    {
+        return $this->belongsTo(Role::class);
+    }
+
+    public function permissions()
+    {
+        return $this->belongsToMany(Permission::class, 'user_permissions')->withPivot('allowed');
+    }
+
+    public function hasPermission($permission)
+    {
+        // direct permission override
+
+        $direct = $this->permissions()
+            ->where('slug', $permission)
+            ->first();
+
+        if ($direct) {
+            return (bool) $direct->pivot->allowed;
+        }
+
+        // role permission
+
+        return $this->role?->permissions()
+            ->where('slug', $permission)
+            ->exists();
+    }
 }

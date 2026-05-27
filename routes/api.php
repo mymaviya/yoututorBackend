@@ -27,30 +27,18 @@ use App\Http\Controllers\API\QuestionTypeController;
 use App\Http\Controllers\API\PaperGeneratorController;
 use App\Http\Controllers\API\LanguageQuestionController;
 use App\Http\Controllers\API\TeacherAnalyticsController;
-
-/*
-|--------------------------------------------------------------------------
-| PUBLIC ROUTES
-|--------------------------------------------------------------------------
-*/
+use App\Http\Controllers\API\RoleController;
+use App\Http\Controllers\API\PermissionController;
+use App\Http\Controllers\API\UserController;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
-/*
-|--------------------------------------------------------------------------
-| AUTH ROUTES
-|--------------------------------------------------------------------------
-*/
-
 Route::middleware('auth:sanctum')->group(function () {
-
-    /* AUTH USER */
 
     Route::post('/logout', [AuthController::class, 'logout']);
 
     Route::get('/current-user', function (Request $request) {
-
         $user = $request->user();
 
         return response()->json([
@@ -60,62 +48,47 @@ Route::middleware('auth:sanctum')->group(function () {
             'contact' => $user->contact,
             'address' => $user->address,
             'role' => $user->role,
-            'profile' => $user->profile
-                ? asset('storage/' . $user->profile)
-                : null,
+            'login_enabled' => $user->login_enabled,
+            'daily_login_start_time' => $user->daily_login_start_time,
+            'daily_login_end_time' => $user->daily_login_end_time,
+            'login_start_date' => $user->login_start_date,
+            'login_end_date' => $user->login_end_date,
+            'role_id' => $user->role_id ?? null,
+            'profile' => $user->profile ? asset('storage/' . $user->profile) : null,
         ]);
     });
-
-    /* PROFILE */
 
     Route::post('/profile/update', [ProfileController::class, 'update']);
     Route::post('/profile/change-password', [ProfileController::class, 'changePassword']);
 
-    // NOTIFICATION
-
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
-
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
-
-    Route::post('/notifications/mark-group-read', [NotificationController::class,'markGroupRead']);
-
-
-
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | ADMIN + TEACHER COMMON ROUTES
-    |--------------------------------------------------------------------------
-    | Important: keep these before admin-only resource routes.
-    */
+    Route::post('/notifications/mark-group-read', [NotificationController::class, 'markGroupRead']);
 
     Route::middleware('role:admin,teacher')->group(function () {
-
         Route::get('/grades', [GradeController::class, 'index']);
         Route::get('/subjects', [SubjectController::class, 'index']);
         Route::get('/lessons', [LessonController::class, 'index']);
-
         Route::get('/question-types', [QuestionTypeController::class, 'index']);
 
         Route::apiResource('questions', QuestionController::class);
         Route::apiResource('question-papers', QuestionPaperController::class);
+
         Route::post('/papers/auto-generate', [QuestionPaperController::class, 'autoGenerate']);
+        Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generate']);
         Route::get('/question-papers/{id}/pdf', [QuestionPaperPdfController::class, 'download']);
+
+        Route::post('/paper-generator/preview', [PaperGeneratorController::class, 'preview']);
+        Route::post('/paper-generator/generate', [PaperGeneratorController::class, 'generate']);
+
         Route::get('/teacher/my-question-tasks', [TeacherQuestionTaskController::class, 'myTasks']);
 
         Route::get('/my-exam-portions', [ExamPortionController::class, 'myPortions']);
         Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit']);
 
-        Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generate']);
-
-        Route::post('/paper-generator/preview', [PaperGeneratorController::class, 'preview']);
-        Route::post('/paper-generator/generate', [PaperGeneratorController::class,'generate']);
-
         Route::get('/my-assignments', function () {
-
             $user = auth()->user();
 
             if ($user->role === 'admin') {
@@ -136,8 +109,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 ]);
             }
 
-            $assignments = $teacher
-                ->assignments()
+            $assignments = $teacher->assignments()
                 ->with(['grade', 'subject'])
                 ->get();
 
@@ -162,14 +134,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | ADMIN ONLY ROUTES
-    |--------------------------------------------------------------------------
-    */
-
     Route::middleware('role:admin')->group(function () {
-
         Route::get('/dashboard', [DashboardController::class, 'index']);
 
         Route::apiResource('grades', GradeController::class)->except(['index']);
@@ -180,12 +145,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/subject_status/{id}', [SubjectController::class, 'status']);
 
         Route::apiResource('teachers', TeacherController::class);
-
         Route::apiResource('teacher-question-tasks', TeacherQuestionTaskController::class);
 
         Route::get('/reports/teacher-question-paper-progress', [TeacherReportController::class, 'questionPaperProgress']);
+
         Route::get('/question-approvals', [QuestionApprovalController::class, 'index']);
-        Route::post('/question-approvals/{question}/approve', [QuestionApprovalController::class, 'approve']);
         Route::post('/question-approvals/{question}/reject', [QuestionApprovalController::class, 'reject']);
 
         Route::apiResource('exam-portions', ExamPortionController::class);
@@ -195,13 +159,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('exam-names', ExamNameController::class);
         Route::post('/exam-names/{examName}/status', [ExamNameController::class, 'status']);
 
-
         Route::get('/paper-blueprints/dropdown', [PaperBlueprintController::class, 'dropdown']);
         Route::post('/paper-blueprints/{id}/status', [PaperBlueprintController::class, 'status']);
         Route::post('/paper-blueprints/{id}/copy', [PaperBlueprintController::class, 'copy']);
         Route::apiResource('paper-blueprints', PaperBlueprintController::class);
 
-        // QUESTION TYPE IMPORTS
         Route::post('/question-types/{questionType}/status', [QuestionTypeController::class, 'status']);
         Route::post('/question-types/import', [QuestionTypeController::class, 'import']);
         Route::get('/question-types/template', [QuestionTypeController::class, 'downloadTemplate']);
@@ -210,28 +172,30 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/language-questions/group', [LanguageQuestionController::class, 'group']);
         Route::get('/teacher-analytics', [TeacherAnalyticsController::class, 'index']);
 
+        // Roles & Permission Management
+        Route::apiResource('roles', RoleController::class);
+        Route::get('/permissions', [PermissionController::class, 'index']);
+        Route::get('/users', [UserController::class, 'index']);
+
+        Route::get('/roles/{role}/permissions', [RoleController::class, 'permissions']);
+        Route::post('/roles/{role}/permissions', [RoleController::class, 'syncPermissions']);
+
+        Route::get('/users/{user}/permissions', [UserController::class, 'permissions']);
+        Route::post('/users/{user}/permissions', [UserController::class, 'syncPermissions']);
+        Route::post('/users/bulk-login-access', [UserController::class, 'bulkLoginAccess']);
+        Route::apiResource('users', UserController::class);
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | TEACHER ONLY ROUTES
-    |--------------------------------------------------------------------------
-    */
+    Route::middleware('permission:approve_questions')->group(function () {
+        Route::post('/question-approvals/{question}/approve', [QuestionApprovalController::class, 'approve']);
+    });
 
     Route::middleware('role:teacher')->group(function () {
-
         Route::get('/teacher/dashboard', [TeacherDashboardController::class, 'index']);
         Route::get('/students', [StudentController::class, 'index']);
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | STUDENT ONLY ROUTES
-    |--------------------------------------------------------------------------
-    */
-
     Route::middleware('role:student')->group(function () {
-
         Route::get('/profile', function (Request $request) {
             return $request->user();
         });

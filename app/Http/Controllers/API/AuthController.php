@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Carbon\Carbon;
 
 class AuthController extends Controller
 {
@@ -39,21 +40,30 @@ class AuthController extends Controller
 
     public function login(Request $request)
     {
-        $validated = $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|string|min:6',
-            'remember' => 'nullable|boolean'
+        $validated = $request->validate(
+            [
+                'email' => 'required|email',
+                'password' => 'required|string|min:6',
+                'remember' => 'nullable|boolean'
             ]
         );
 
-        $user = User::where('email',$validated['email'])->first();
+        $user = User::where('email', $validated['email'])->first();
 
-        if (!$user ||!Hash::check($validated['password'],$user->password)) {
+        if (!$user || !Hash::check($validated['password'], $user->password)) {
 
             throw ValidationException::withMessages([
 
                 'email' => ['Invalid email or password.']
             ]);
+        }
+
+        $accessError = $this->checkLoginAccess($user);
+
+        if ($accessError) {
+            return response()->json([
+                'message' => $accessError,
+            ], 403);
         }
 
         if ($request->remember) {
@@ -116,7 +126,7 @@ class AuthController extends Controller
                 'role' => $user->role,
                 'profile' => $user->profile ? asset('storage/' . $user->profile) : null
             ]
-        ],201);
+        ], 201);
     }
 
     public function currentUser(Request $request)
@@ -183,5 +193,127 @@ class AuthController extends Controller
     {
         $request->user()->tokens()->delete();
         return response()->json(['message' => 'Logged out']);
+    }
+
+
+    private function buildLoginWindow($user)
+    {
+        $timezone = 'Asia/Kolkata';
+
+        $now = Carbon::now($timezone);
+
+        $startTime = $user->daily_login_start_time ?: '09:00:00';
+        $endTime = $user->daily_login_end_time ?: '17:00:00';
+
+        $startToday = Carbon::createFromFormat(
+            'Y-m-d H:i:s',
+            $now->toDateString() . ' ' . $startTime,
+            $timezone
+        );
+
+        $endToday = Carbon::createFromFormat(
+            'Y-m-d H:i:s',
+            $now->toDateString() . ' ' . $endTime,
+            $timezone
+        );
+
+        return [$now, $startToday, $endToday];
+    }
+
+    private function loginResumeMessage($user)
+    {
+        [$now, $startToday, $endToday] = $this->buildLoginWindow($user);
+
+        // BEFORE LOGIN START TIME
+        if ($now->lt($startToday)) {
+
+            $diff = $now->diff($startToday);
+
+            $timeText = '';
+
+            if ($diff->h > 0) {
+                $timeText .= $diff->h . ' hrs ';
+            }
+
+            if ($diff->i > 0) {
+                $timeText .= $diff->i . ' min';
+            }
+
+            $timeText = trim($timeText);
+
+            return 'Login will resume after ' .
+                $timeText .
+                ' at ' .
+                $startToday->format('h:i A') . '.';
+        }
+
+        // AFTER LOGIN END TIME
+        if ($now->gt($endToday)) {
+
+            $startTomorrow = $startToday->copy()->addDay();
+
+            $diff = $now->diff($startTomorrow);
+
+            $timeText = '';
+
+            if ($diff->h > 0) {
+                $timeText .= $diff->h . ' hrs ';
+            }
+
+            if ($diff->i > 0) {
+                $timeText .= $diff->i . ' min';
+            }
+
+            $timeText = trim($timeText);
+
+            return 'Login will resume after ' .
+                $timeText .
+                ' at ' .
+                $startTomorrow->format('h:i A') . '.';
+        }
+
+        return 'Login not allowed currently.';
+    }
+
+    private function checkLoginAccess($user)
+    {
+        $timezone = 'Asia/Kolkata';
+
+        $today = Carbon::today($timezone);
+
+        if (!$user->is_active) {
+            return 'Your account is inactive.';
+        }
+
+        if (!$user->login_enabled) {
+            return 'Your login access has been disabled.';
+        }
+
+        if (
+            $user->login_start_date &&
+            $today->lt(Carbon::parse($user->login_start_date, $timezone))
+        ) {
+            $startDate = Carbon::parse($user->login_start_date, $timezone);
+
+            return 'Your login access will start from ' .
+                $startDate->format('d M Y') . '.';
+        }
+
+        if (
+            $user->login_end_date &&
+            $today->gt(Carbon::parse($user->login_end_date, $timezone))
+        ) {
+            return 'Your login access has expired.';
+        }
+
+        if ($user->daily_login_start_time && $user->daily_login_end_time) {
+            [$now, $startToday, $endToday] = $this->buildLoginWindow($user);
+
+            if ($now->lt($startToday) || $now->gt($endToday)) {
+                return $this->loginResumeMessage($user);
+            }
+        }
+
+        return null;
     }
 }
