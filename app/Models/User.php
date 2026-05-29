@@ -27,6 +27,13 @@ class User extends Authenticatable
         'address',
         'profile',
         'role',
+        'role_id',
+        'is_active',
+        'login_enabled',
+        'login_start_date',
+        'login_end_date',
+        'daily_login_start_time',
+        'daily_login_end_time',
     ];
 
     /**
@@ -49,6 +56,8 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_active' => 'boolean',
+            'login_enabled' => 'boolean',
         ];
     }
 
@@ -88,9 +97,6 @@ class User extends Authenticatable
 
     public function roleData()
     {
-        return $this->belongsTo(
-            Role::class,
-            'role_id'
-        );
+        return $this->belongsTo(Role::class, 'role_id');
     }
 }
