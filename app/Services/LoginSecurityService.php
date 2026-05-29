@@ -64,7 +64,10 @@ class LoginSecurityService
         // Admin can login from any device
         $user->loadMissing('roleData');
 
-        if ($user->roleData?->bypass_device_restriction) {
+        if (
+            $user->role === 'admin' ||
+            $user->roleData?->bypass_device_restriction
+        ) {
             return;
         }
 
