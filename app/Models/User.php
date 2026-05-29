@@ -85,4 +85,12 @@ class User extends Authenticatable
             ->where('slug', $permission)
             ->exists();
     }
+
+    public function roleData()
+    {
+        return $this->belongsTo(
+            Role::class,
+            'role_id'
+        );
+    }
 }

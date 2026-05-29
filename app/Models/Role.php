@@ -9,6 +9,7 @@ class Role extends Model
     protected $fillable = [
         'name',
         'slug',
+        'bypass_device_restriction',
     ];
 
     public function permissions()

@@ -61,6 +61,13 @@ class LoginSecurityService
             return;
         }
 
+        // Admin can login from any device
+        $user->loadMissing('roleData');
+
+        if ($user->roleData?->bypass_device_restriction) {
+            return;
+        }
+
         $deviceId = $this->deviceId($request);
 
         $existingDevice = UserDevice::where('device_id', $deviceId)->first();

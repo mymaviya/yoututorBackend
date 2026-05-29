@@ -26,12 +26,14 @@ class RoleController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255|unique:roles,name',
             'slug' => 'required|string|max:255|unique:roles,slug',
+            'bypass_device_restriction' => 'boolean',
             'permissions' => 'nullable|array',
         ]);
 
         $role = Role::create([
             'name' => $validated['name'],
             'slug' => $validated['slug'],
+            'bypass_device_restriction' => $validated['bypass_device_restriction'],
         ]);
 
         if ($request->permissions) {
@@ -55,12 +57,14 @@ class RoleController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255|unique:roles,name,' . $role->id,
             'slug' => 'required|string|max:255|unique:roles,slug,' . $role->id,
+            'bypass_device_restriction' => 'boolean',
             'permissions' => 'nullable|array',
         ]);
 
         $role->update([
             'name' => $validated['name'],
             'slug' => $validated['slug'],
+            'bypass_device_restriction' => $validated['bypass_device_restriction'],
         ]);
 
         $permissionIds = Permission::whereIn(
@@ -87,6 +91,7 @@ class RoleController extends Controller
     {
         $data = $request->validate([
             'permissions' => 'nullable|array',
+            'bypass_device_restriction' => 'boolean',
         ]);
 
         $permissionIds = Permission::whereIn(

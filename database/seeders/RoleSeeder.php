@@ -36,8 +36,35 @@ class RoleSeeder extends Seeder
         foreach ($roles as $role) {
 
             Role::updateOrCreate(
-                ['slug' => $role['slug']],
-                ['name' => $role['name']]
+                ['slug' => 'admin'],
+                [
+                    'name' => 'Admin',
+                    'bypass_device_restriction' => true,
+                ]
+            );
+
+            Role::updateOrCreate(
+                ['slug' => 'teacher'],
+                [
+                    'name' => 'Teacher',
+                    'bypass_device_restriction' => false,
+                ]
+            );
+
+            Role::updateOrCreate(
+                ['slug' => 'reviewer'],
+                [
+                    'name' => 'Reviewer',
+                    'bypass_device_restriction' => false,
+                ]
+            );
+
+            Role::updateOrCreate(
+                ['slug' => 'examiner'],
+                [
+                    'name' => 'Examiner',
+                    'bypass_device_restriction' => false,
+                ]
             );
         }
     }
