@@ -11,6 +11,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
+use App\Imports\TeachersImport;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\TeacherImportTemplateExport;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+
+
 class TeacherController extends Controller
 {
     public function index()
@@ -152,7 +158,6 @@ class TeacherController extends Controller
                     'assignments.subject'
                 ])
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -161,8 +166,6 @@ class TeacherController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
-
-
     }
 
     public function destroy($id)
@@ -173,6 +176,92 @@ class TeacherController extends Controller
 
         return response()->json([
             'message' => 'Teacher deleted successfully'
+        ]);
+    }
+
+    public function import(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
+
+        $import = new TeachersImport();
+
+        Excel::import($import, $request->file('file'));
+
+        return response()->json([
+            'message' => 'Teacher import completed',
+            'imported' => $import->imported,
+            'skipped' => $import->skipped,
+            'errors' => $import->errors,
+            'credentials' => $import->credentials,
+        ]);
+    }
+
+    public function downloadTemplate()
+    {
+        return Excel::download(
+            new TeacherImportTemplateExport(),
+            'teacher-import-template.xlsx'
+        );
+    }
+
+    public function importPreview(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
+
+        $spreadsheet = IOFactory::load($request->file('file')->getRealPath());
+        $rows = $spreadsheet->getActiveSheet()->toArray();
+
+        $preview = [];
+        $seenEmails = [];
+
+        foreach (array_slice($rows, 1) as $index => $row) {
+            $rowNumber = $index + 2;
+
+            $name = trim($row[0] ?? '');
+            $email = trim($row[1] ?? '');
+            $mobile = trim($row[2] ?? '');
+            $qualification = trim($row[3] ?? '');
+            $address = trim($row[4] ?? '');
+
+            $errors = [];
+
+            if (!$name) $errors[] = 'Name is required';
+            if (!$email) $errors[] = 'Email is required';
+            if (!$mobile) $errors[] = 'Mobile is required';
+
+            if ($email && User::where('email', $email)->exists()) {
+                $errors[] = 'Email already exists';
+            }
+
+            if ($email && in_array(strtolower($email), $seenEmails)) {
+                $errors[] = 'Duplicate email in file';
+            }
+
+            if ($email) {
+                $seenEmails[] = strtolower($email);
+            }
+
+            $preview[] = [
+                'row' => $rowNumber,
+                'name' => $name,
+                'email' => $email,
+                'mobile' => $mobile,
+                'qualification' => $qualification,
+                'address' => $address,
+                'status' => count($errors) ? 'error' : 'ready',
+                'errors' => $errors,
+            ];
+        }
+
+        return response()->json([
+            'total' => count($preview),
+            'ready' => collect($preview)->where('status', 'ready')->count(),
+            'errors' => collect($preview)->where('status', 'error')->count(),
+            'rows' => $preview,
         ]);
     }
 }

@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\DB;
 use App\Models\Question;
 use App\Models\QuestionPaper;
 use App\Models\QuestionPaperQuestion;
+use App\Models\User;
+use App\Services\AuditService;
 
 class QuestionPaperController extends Controller
 {
@@ -87,6 +89,8 @@ class QuestionPaperController extends Controller
         }
 
         DB::commit();
+
+        AuditService::log('QuestionPapers','Create','Question paper created ID: ' . $paper->id,null,$paper->toArray());
 
         return response()->json([
             'message' => 'Question paper created successfully',
@@ -185,6 +189,8 @@ class QuestionPaperController extends Controller
 
             DB::commit();
 
+            AuditService::log('QuestionPapers','Update','Question paper updated ID: ' . $paper->id,null,$paper->toArray());
+
             return response()->json([
 
                 'message' => 'Question paper updated successfully',
@@ -213,6 +219,7 @@ class QuestionPaperController extends Controller
     {
         $paper = QuestionPaper::findOrFail($id);
         $paper->delete();
+        AuditService::log('QuestionPapers','Delete','Question paper deleted ID: ' . $paper->id, $paper->toArray(), null);
         return response()->json(['message' => 'Question paper deleted successfully']);
     }
 

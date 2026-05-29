@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\Question;
 use Illuminate\Http\Request;
+use App\Services\AuditService;
 
 class QuestionApprovalController extends Controller
 {
@@ -60,6 +61,8 @@ class QuestionApprovalController extends Controller
             'rejection_reason' => null,
         ]);
 
+        AuditService::log('Questions','Approve','Question approved ID: ' . $question->id);
+
         notifyUser(
             $question->created_by,
             'Question Approved',
@@ -93,6 +96,9 @@ class QuestionApprovalController extends Controller
             'approved_at' => now(),
             'rejection_reason' => $data['rejection_reason'],
         ]);
+
+        AuditService::log('Questions','Reject','Question rejected ID: ' . $question->id);
+
 
         notifyUser(
             $question->created_by,

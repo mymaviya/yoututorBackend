@@ -30,9 +30,16 @@ use App\Http\Controllers\API\TeacherAnalyticsController;
 use App\Http\Controllers\API\RoleController;
 use App\Http\Controllers\API\PermissionController;
 use App\Http\Controllers\API\UserController;
+use App\Http\Controllers\API\LoginHolidayController;
+use App\Http\Controllers\API\UserDeviceController;
+use App\Http\Controllers\API\UserSecurityController;
+use App\Http\Controllers\API\AuditLogController;
+
+
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+
 
 Route::middleware('auth:sanctum')->group(function () {
 
@@ -144,7 +151,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/grade_status/{id}', [GradeController::class, 'status']);
         Route::post('/subject_status/{id}', [SubjectController::class, 'status']);
 
-        Route::apiResource('teachers', TeacherController::class);
         Route::apiResource('teacher-question-tasks', TeacherQuestionTaskController::class);
 
         Route::get('/reports/teacher-question-paper-progress', [TeacherReportController::class, 'questionPaperProgress']);
@@ -167,7 +173,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/question-types/{questionType}/status', [QuestionTypeController::class, 'status']);
         Route::post('/question-types/import', [QuestionTypeController::class, 'import']);
         Route::get('/question-types/template', [QuestionTypeController::class, 'downloadTemplate']);
-        Route::apiResource('question-types', QuestionTypeController::class);
+
+        Route::apiResource('question-types', QuestionTypeController::class)->except(['index']);
 
         Route::get('/language-questions/group', [LanguageQuestionController::class, 'group']);
         Route::get('/teacher-analytics', [TeacherAnalyticsController::class, 'index']);
@@ -184,6 +191,24 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/users/{user}/permissions', [UserController::class, 'syncPermissions']);
         Route::post('/users/bulk-login-access', [UserController::class, 'bulkLoginAccess']);
         Route::apiResource('users', UserController::class);
+
+        Route::apiResource('login-holidays', LoginHolidayController::class);
+
+        Route::get('/user-devices', [UserDeviceController::class, 'index']);
+        Route::post('/user-devices/{device}/trust', [UserDeviceController::class, 'trust']);
+        Route::post('/user-devices/{device}/block', [UserDeviceController::class, 'block']);
+        Route::delete('/user-devices/{device}', [UserDeviceController::class, 'destroy']);
+
+        Route::get('/users/{user}/security', [UserSecurityController::class, 'show']);
+        Route::put('/users/{user}/security', [UserSecurityController::class, 'update']);
+
+        Route::get('/audit-logs', [AuditLogController::class, 'index']);
+
+        Route::post('/teachers/import-preview', [TeacherController::class, 'importPreview']);
+        Route::get('/teachers/importTemplate', [TeacherController::class, 'downloadTemplate']);
+        Route::post('/teachers/import', [TeacherController::class, 'import']);
+        Route::apiResource('teachers', TeacherController::class);
+
     });
 
     Route::middleware('permission:approve_questions')->group(function () {

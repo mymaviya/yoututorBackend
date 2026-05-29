@@ -13,6 +13,8 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use App\Services\AuditService;
+
 
 class QuestionController extends Controller
 {
@@ -204,8 +206,6 @@ class QuestionController extends Controller
                     'message' => "This task allows only {$task->target_count} questions. You have already created {$createdCount}. You can add only " . max($task->target_count - $createdCount, 0) . " more."
                 ], 403);
             }
-
-
         }
 
         /* QUESTION IMAGE */
@@ -304,6 +304,7 @@ class QuestionController extends Controller
         }
 
         DB::commit();
+        AuditService::log('Questions','Create','Question created',null,$question->toArray());
 
         $admins = User::where('role', 'admin')->get();
 
@@ -368,6 +369,8 @@ class QuestionController extends Controller
         try {
 
             $question = Question::findOrFail($id);
+
+            $oldQuestion = $question->toArray();
 
             if (auth()->user()->role === 'teacher') {
                 $allowed = auth()->user()
@@ -495,6 +498,8 @@ class QuestionController extends Controller
 
             DB::commit();
 
+            AuditService::log('Questions','Update','Question updated',$oldQuestion, $question->toArray());
+
             return response()->json([
                 'message' => 'Question updated successfully',
                 'data' => $question->load('options')
@@ -527,6 +532,8 @@ class QuestionController extends Controller
                 Storage::disk('public')->delete($opt->option_image);
             }
         }
+
+        AuditService::log('Questions','Delete','Question deleted',$question->toArray(),null);
 
         $question->delete();
 

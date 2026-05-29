@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\Permission;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use App\Services\AuditService;
 
 class UserController extends Controller
 {
@@ -80,6 +81,8 @@ class UserController extends Controller
             'daily_login_end_time' => $data['daily_login_end_time'] ?? null,
         ]);
 
+        AuditService::log('Users','Create','User created ID: ' . $user->id, null, $user->toArray());
+
         return response()->json([
             'message' => 'User created successfully',
             'data' => $user->load('role'),
@@ -139,6 +142,8 @@ class UserController extends Controller
 
         $user->update($payload);
 
+        AuditService::log('Users','Update','User updated ID: ' . $user->id, null, $user->toArray());
+
         return response()->json([
             'message' => 'User updated successfully',
             'data' => $user->load('role'),
@@ -148,6 +153,8 @@ class UserController extends Controller
     public function destroy(User $user)
     {
         $user->delete();
+
+        AuditService::log('Users','Delete','User deleted ID: ' . $user->id, $user->toArray(), null);
 
         return response()->json([
             'message' => 'User deleted successfully',
