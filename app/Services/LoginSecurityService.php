@@ -62,11 +62,9 @@ class LoginSecurityService
         }
 
         // Admin can login from any device
-        $user->loadMissing('roleData');
-
-        if ($user->role === 'admin') {
-            return;
-        }
+        if (($user->role ?? null) === 'admin') {
+    return;
+}
 
         $deviceId = $this->deviceId($request);
 
