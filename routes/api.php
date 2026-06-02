@@ -34,7 +34,8 @@ use App\Http\Controllers\API\LoginHolidayController;
 use App\Http\Controllers\API\UserDeviceController;
 use App\Http\Controllers\API\UserSecurityController;
 use App\Http\Controllers\API\AuditLogController;
-
+use App\Models\Permission;
+use App\Models\SidebarMenu;
 
 
 Route::post('/register', [AuthController::class, 'register']);
@@ -47,6 +48,28 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/current-user', function (Request $request) {
         $user = $request->user();
+
+        $user->loadMissing('roleData.permissions');
+
+        $permissionSlugs = $user->role === 'admin'
+            ? Permission::pluck('slug')
+            : ($user->roleData?->permissions->pluck('slug') ?? collect());
+
+        $sidebarMenus = SidebarMenu::where('is_active', true)
+            ->orderBy('sort_order')
+            ->get()
+            ->filter(function ($menu) use ($permissionSlugs, $user) {
+                if ($user->role === 'admin') {
+                    return true;
+                }
+
+                if (!$menu->permission_slug) {
+                    return true;
+                }
+
+                return $permissionSlugs->contains($menu->permission_slug);
+            })
+            ->values();
 
         return response()->json([
             'id' => $user->id,
@@ -62,6 +85,9 @@ Route::middleware('auth:sanctum')->group(function () {
             'login_end_date' => $user->login_end_date,
             'role_id' => $user->role_id ?? null,
             'profile' => $user->profile ? asset('storage/' . $user->profile) : null,
+            'permissions' => $permissionSlugs->values(),
+            'sidebar_menus' => $sidebarMenus,
+
         ]);
     });
 
@@ -208,7 +234,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/teachers/importTemplate', [TeacherController::class, 'downloadTemplate']);
         Route::post('/teachers/import', [TeacherController::class, 'import']);
         Route::apiResource('teachers', TeacherController::class);
-
     });
 
     Route::middleware('permission:approve_questions')->group(function () {

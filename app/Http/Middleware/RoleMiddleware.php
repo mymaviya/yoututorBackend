@@ -23,12 +23,23 @@ class RoleMiddleware
             ], 401);
         }
 
-        if (!in_array($user->role, $roles)) {
+        $user->loadMissing('roleData');
 
+        $userRoleSlug = $user->roleData?->slug
+            ?? $user->role;
+
+        $userRoleSlug = strtolower(trim($userRoleSlug));
+
+        $allowedRoles = array_map(
+            fn($role) => strtolower(trim($role)),
+            $roles
+        );
+
+        if (!in_array($userRoleSlug, $allowedRoles)) {
             return response()->json([
                 'message' => 'Unauthorized.',
-                'user_role' => $user->role,
-                'allowed_roles' => $roles,
+                'user_role' => $userRoleSlug,
+                'allowed_roles' => $allowedRoles,
                 'role_id' => $user->role_id,
             ], 403);
         }
