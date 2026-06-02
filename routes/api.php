@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Route as RouteFacade;
 
 use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\DashboardController;
@@ -34,6 +35,7 @@ use App\Http\Controllers\API\LoginHolidayController;
 use App\Http\Controllers\API\UserDeviceController;
 use App\Http\Controllers\API\UserSecurityController;
 use App\Http\Controllers\API\AuditLogController;
+use App\Http\Controllers\API\SidebarMenuController;
 use App\Models\Permission;
 use App\Models\SidebarMenu;
 
@@ -55,12 +57,15 @@ Route::middleware('auth:sanctum')->group(function () {
             ? Permission::pluck('slug')
             : ($user->roleData?->permissions->pluck('slug') ?? collect());
 
+        $roleSlug = $user->roleData?->slug ?? $user->role;
+
         $sidebarMenus = SidebarMenu::where('is_active', true)
             ->orderBy('sort_order')
             ->get()
-            ->filter(function ($menu) use ($permissionSlugs, $user) {
-                if ($user->role === 'admin') {
-                    return true;
+            ->filter(function ($menu) use ($permissionSlugs, $roleSlug) {
+
+                if ($menu->role_slug && $menu->role_slug !== $roleSlug) {
+                    return false;
                 }
 
                 if (!$menu->permission_slug) {
@@ -71,23 +76,30 @@ Route::middleware('auth:sanctum')->group(function () {
             })
             ->values();
 
+        $roleSlug = $user->roleData?->slug ?? $user->role;
+
+        $dashboardRoute = match ($roleSlug) {
+            'teacher' => 'teacher.dashboard',
+            default => 'Dashboard',
+        };
+
         return response()->json([
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
             'contact' => $user->contact,
             'address' => $user->address,
-            'role' => $user->role,
+            'role' => $roleSlug,
+            'role_id' => $user->role_id ?? null,
             'login_enabled' => $user->login_enabled,
             'daily_login_start_time' => $user->daily_login_start_time,
             'daily_login_end_time' => $user->daily_login_end_time,
             'login_start_date' => $user->login_start_date,
             'login_end_date' => $user->login_end_date,
-            'role_id' => $user->role_id ?? null,
             'profile' => $user->profile ? asset('storage/' . $user->profile) : null,
             'permissions' => $permissionSlugs->values(),
             'sidebar_menus' => $sidebarMenus,
-
+            'dashboard_route' => $dashboardRoute,
         ]);
     });
 
@@ -168,6 +180,21 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::middleware('role:admin')->group(function () {
+
+        Route::get('/app-routes', function () {
+            return collect(RouteFacade::getRoutes())
+                ->map(function ($route) {
+                    return [
+                        'uri' => $route->uri(),
+                        'name' => $route->getName(),
+                        'methods' => $route->methods(),
+                        'action' => $route->getActionName(),
+                    ];
+                })
+                ->filter(fn($route) => $route['name'])
+                ->values();
+        });
+
         Route::get('/dashboard', [DashboardController::class, 'index']);
 
         Route::apiResource('grades', GradeController::class)->except(['index']);
@@ -207,7 +234,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Roles & Permission Management
         Route::apiResource('roles', RoleController::class);
-        Route::get('/permissions', [PermissionController::class, 'index']);
+        Route::apiResource('permissions', PermissionController::class);
         Route::get('/users', [UserController::class, 'index']);
 
         Route::get('/roles/{role}/permissions', [RoleController::class, 'permissions']);
@@ -234,6 +261,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/teachers/importTemplate', [TeacherController::class, 'downloadTemplate']);
         Route::post('/teachers/import', [TeacherController::class, 'import']);
         Route::apiResource('teachers', TeacherController::class);
+
+        Route::post('/sidebar-menus/reorder', [SidebarMenuController::class, 'reorder']);
+        Route::apiResource('sidebar-menus', SidebarMenuController::class);
     });
 
     Route::middleware('permission:approve_questions')->group(function () {

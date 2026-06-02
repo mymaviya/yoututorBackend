@@ -54,25 +54,21 @@ class RoleController extends Controller
 
     public function update(Request $request, Role $role)
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255|unique:roles,name,' . $role->id,
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
             'slug' => 'required|string|max:255|unique:roles,slug,' . $role->id,
             'bypass_device_restriction' => 'boolean',
-            'permissions' => 'nullable|array',
+            'permissions' => 'array',
+            'permissions.*' => 'exists:permissions,id',
         ]);
 
         $role->update([
-            'name' => $validated['name'],
-            'slug' => $validated['slug'],
-            'bypass_device_restriction' => $validated['bypass_device_restriction'],
+            'name' => $data['name'],
+            'slug' => $data['slug'],
+            'bypass_device_restriction' => $data['bypass_device_restriction'] ?? false,
         ]);
 
-        $permissionIds = Permission::whereIn(
-            'slug',
-            $request->permissions ?? []
-        )->pluck('id');
-
-        $role->permissions()->sync($permissionIds);
+        $role->permissions()->sync($data['permissions'] ?? []);
 
         return response()->json([
             'message' => 'Role updated successfully',

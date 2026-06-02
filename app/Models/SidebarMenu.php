@@ -12,6 +12,7 @@ class SidebarMenu extends Model
         'route_name',
         'group_name',
         'permission_slug',
+        'role_slug',
         'sort_order',
         'is_active',
     ];

@@ -128,6 +128,9 @@ class AuthController extends Controller
             }
         }
 
+        $user->loadMissing('roleData');
+        $roleSlug = $user->roleData?->slug;
+
         return response()->json([
             'success' => true,
             'message' => 'Login successful',
@@ -141,6 +144,7 @@ class AuthController extends Controller
                 'contact' => $user->contact,
                 'address' => $user->address,
                 'role' => $user->role,
+                'role_slug' => $roleSlug,
                 'profile' => $user->profile ? asset('storage/' . $user->profile) : null
             ]
         ]);

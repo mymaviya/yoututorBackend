@@ -9,6 +9,8 @@ class Permission extends Model
     protected $fillable = [
         'name',
         'slug',
+        'group_name',
+
     ];
 
     public function roles()
@@ -17,5 +19,11 @@ class Permission extends Model
             Role::class,
             'role_permissions'
         );
+    }
+
+    public function users()
+    {
+        return $this->belongsToMany(User::class, 'user_permissions')
+            ->withPivot('allowed');
     }
 }

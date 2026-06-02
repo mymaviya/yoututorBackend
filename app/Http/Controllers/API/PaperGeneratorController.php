@@ -8,6 +8,8 @@ use App\Models\QuestionPaper;
 use App\Services\AutoPaperGeneratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Models\User;
+use App\Services\AuditService;
 
 class PaperGeneratorController extends Controller
 {
@@ -91,6 +93,16 @@ class PaperGeneratorController extends Controller
                     }
                 }
             }
+
+            AuditService::log(
+                'Paper Generation',
+                'Generated question paper from blueprint',
+                "Generated paper '{$paper->title}' (ID: {$paper->id}) from blueprint '{$blueprint->title}' (ID: {$blueprint->id})",
+                null,
+                $paper->toArray(),
+                auth()->id()
+
+            );
 
             return response()->json([
                 'message' => 'Question paper generated successfully',
