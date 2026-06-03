@@ -34,7 +34,8 @@ class QuestionController extends Controller
             'questionType',
             'languageItems',
             'matchPairs',
-            'creator'
+            'creator',
+
 
         ]);
 
@@ -304,7 +305,7 @@ class QuestionController extends Controller
         }
 
         DB::commit();
-        AuditService::log('Questions','Create','Question created',null,$question->toArray());
+        AuditService::log('Questions', 'Create', 'Question created', null, $question->toArray());
 
         $admins = User::where('role', 'admin')->get();
 
@@ -337,7 +338,7 @@ class QuestionController extends Controller
             'questionType',
             'languageItems',
             'creator',
-            'approver'
+            'approver',
         ])->findOrFail($id);
     }
 
@@ -498,7 +499,7 @@ class QuestionController extends Controller
 
             DB::commit();
 
-            AuditService::log('Questions','Update','Question updated',$oldQuestion, $question->toArray());
+            AuditService::log('Questions', 'Update', 'Question updated', $oldQuestion, $question->toArray());
 
             return response()->json([
                 'message' => 'Question updated successfully',
@@ -533,7 +534,7 @@ class QuestionController extends Controller
             }
         }
 
-        AuditService::log('Questions','Delete','Question deleted',$question->toArray(),null);
+        AuditService::log('Questions', 'Delete', 'Question deleted', $question->toArray(), null);
 
         $question->delete();
 

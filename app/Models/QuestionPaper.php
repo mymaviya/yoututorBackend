@@ -15,7 +15,14 @@ class QuestionPaper extends Model
         'subject_id',
         'is_active',
         'total_marks',
-        'created_by'
+        'created_by',
+        'status',
+        'finalized_at',
+        'finalized_by',
+        'printed_at',
+        'printed_by',
+        'archived_at',
+        'archived_by',
     ];
 
     public function grade()
@@ -30,7 +37,7 @@ class QuestionPaper extends Model
 
     public function questions()
     {
-       return $this->hasMany(QuestionPaperQuestion::class)->orderBy('sort_order');
+        return $this->hasMany(QuestionPaperQuestion::class)->orderBy('sort_order');
     }
 
     public function items()
@@ -43,6 +50,18 @@ class QuestionPaper extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    public function finalizedBy()
+    {
+        return $this->belongsTo(User::class, 'finalized_by');
+    }
 
+    public function printedBy()
+    {
+        return $this->belongsTo(User::class, 'printed_by');
+    }
 
+    public function archivedBy()
+    {
+        return $this->belongsTo(User::class, 'archived_by');
+    }
 }

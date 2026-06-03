@@ -264,6 +264,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::post('/sidebar-menus/reorder', [SidebarMenuController::class, 'reorder']);
         Route::apiResource('sidebar-menus', SidebarMenuController::class);
+
+        Route::post('question-papers/{id}/finalize',[QuestionPaperController::class, 'finalize']);
+        Route::post('question-papers/{id}/reopen',[QuestionPaperController::class, 'reopen']);
+        Route::post('question-papers/{id}/printed',[QuestionPaperController::class, 'markPrinted']);
+        Route::post('question-papers/{id}/archive',[QuestionPaperController::class, 'archive']);
+
     });
 
     Route::middleware('permission:approve_questions')->group(function () {

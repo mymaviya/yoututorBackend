@@ -90,7 +90,7 @@ class QuestionPaperController extends Controller
 
         DB::commit();
 
-        AuditService::log('QuestionPapers','Create','Question paper created ID: ' . $paper->id,null,$paper->toArray(),auth()->id());
+        AuditService::log('QuestionPapers', 'Create', 'Question paper created ID: ' . $paper->id, null, $paper->toArray(), auth()->id());
 
         return response()->json([
             'message' => 'Question paper created successfully',
@@ -107,6 +107,10 @@ class QuestionPaperController extends Controller
             'subject',
             'questions.question.options',
             'questions.question.matchPairs',
+            'questions.question.lesson',
+            'questions.question.options',
+            'questions.question.questionType',
+
         ])->findOrFail($id);
 
         $paper->questions->transform(function ($paperQuestion) {
@@ -155,6 +159,13 @@ class QuestionPaperController extends Controller
 
             $paper = QuestionPaper::findOrFail($id);
 
+            if ($paper->status !== 'draft') {
+                AuditService::log('QuestionPapers', 'Update', 'Only draft papers can be edited. Paper ID: ' . $paper->id, $paper->toArray(), null, auth()->id());
+                return response()->json([
+                    'message' => 'Only draft papers can be edited.'
+                ], 422);
+            }
+
             /* UPDATE PAPER */
 
             $paper->update([
@@ -189,7 +200,7 @@ class QuestionPaperController extends Controller
 
             DB::commit();
 
-            AuditService::log('QuestionPapers','Update','Question paper updated ID: ' . $paper->id,null,$paper->toArray(),auth()->id());
+            AuditService::log('QuestionPapers', 'Update', 'Question paper updated ID: ' . $paper->id, null, $paper->toArray(), auth()->id());
 
             return response()->json([
 
@@ -213,13 +224,21 @@ class QuestionPaperController extends Controller
         }
     }
 
-    /* DELETE PAPER    */
+    /* DELETE PAPER   */
 
     public function destroy($id)
     {
         $paper = QuestionPaper::findOrFail($id);
+
+        if ($paper->status !== 'draft') {
+            return response()->json([
+                'message' => 'Only draft papers can be deleted.'
+            ], 422);
+        }
+
         $paper->delete();
-        AuditService::log('QuestionPapers','Delete','Question paper deleted ID: ' . $paper->id, $paper->toArray(), null, auth()->id());
+
+        AuditService::log('QuestionPapers', 'Delete', 'Question paper deleted ID: ' . $paper->id, $paper->toArray(), null, auth()->id());
         return response()->json(['message' => 'Question paper deleted successfully']);
     }
 
@@ -284,5 +303,89 @@ class QuestionPaperController extends Controller
         $selectedQuestions = $selectedQuestions->unique('id');
 
         return response()->json($selectedQuestions->values());
+    }
+
+    public function finalize($id)
+    {
+        $paper = QuestionPaper::findOrFail($id);
+
+        if ($paper->status !== 'draft') {
+            return response()->json([
+                'message' => 'Paper is already finalized.'
+            ], 422);
+        }
+
+        $paper->update([
+            'status' => 'finalized',
+            'finalized_at' => now(),
+            'finalized_by' => auth()->id(),
+        ]);
+
+        AuditService::log(
+            'QuestionPapers',
+            'Finalize',
+            'Question paper finalized ID: ' . $paper->id,
+            null,
+            $paper->toArray(),
+            auth()->id()
+        );
+
+        return response()->json([
+            'message' => 'Paper finalized successfully.'
+        ]);
+    }
+
+    public function reopen($id)
+    {
+        $paper = QuestionPaper::findOrFail($id);
+
+        $paper->update([
+            'status' => 'draft',
+            'finalized_at' => null,
+            'finalized_by' => null,
+        ]);
+
+        AuditService::log(
+            'QuestionPapers',
+            'Reopen',
+            'Question paper reopened ID: ' . $paper->id,
+            null,
+            $paper->toArray(),
+            auth()->id()
+        );
+
+        return response()->json([
+            'message' => 'Paper reopened successfully.'
+        ]);
+    }
+
+    public function markPrinted($id)
+    {
+        $paper = QuestionPaper::findOrFail($id);
+
+        $paper->update([
+            'status' => 'printed',
+            'printed_at' => now(),
+            'printed_by' => auth()->id(),
+        ]);
+
+        return response()->json([
+            'message' => 'Paper marked as printed.'
+        ]);
+    }
+
+    public function archive($id)
+    {
+        $paper = QuestionPaper::findOrFail($id);
+
+        $paper->update([
+            'status' => 'archived',
+            'archived_at' => now(),
+            'archived_by' => auth()->id(),
+        ]);
+
+        return response()->json([
+            'message' => 'Paper archived successfully.'
+        ]);
     }
 }
