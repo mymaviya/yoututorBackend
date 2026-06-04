@@ -13,6 +13,7 @@ class QuestionPaper extends Model
         'instructions',
         'grade_id',
         'subject_id',
+        'paper_blueprint_id',
         'is_active',
         'total_marks',
         'created_by',
@@ -63,5 +64,10 @@ class QuestionPaper extends Model
     public function archivedBy()
     {
         return $this->belongsTo(User::class, 'archived_by');
+    }
+
+    public function blueprint()
+    {
+        return $this->belongsTo(PaperBlueprint::class, 'paper_blueprint_id');
     }
 }

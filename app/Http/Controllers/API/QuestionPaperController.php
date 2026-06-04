@@ -40,6 +40,7 @@ class QuestionPaperController extends Controller
             'duration' => 'required|numeric',
             'grade_id' => 'required',
             'subject_id' => 'required',
+            'paper_blueprint_id' => 'required|exists:paper_blueprints,id',
             'instructions' => 'required|min:150',
             'questions' => 'required|array|min:1',
             'questions.*.section' => 'nullable|string',
@@ -68,9 +69,9 @@ class QuestionPaperController extends Controller
             'instructions' => $request->instructions,
             'grade_id' => $request->grade_id,
             'subject_id' => $request->subject_id,
+            'paper_blueprint_id' => $request->paper_blueprint_id,
             'total_marks' => collect($request->questions)->sum('marks'),
             'created_by' => auth()->id(),
-
         ]);
 
 
@@ -176,9 +177,9 @@ class QuestionPaperController extends Controller
                 'instructions' => $request->instructions,
                 'grade_id' => $request->grade_id,
                 'subject_id' => $request->subject_id,
+                'paper_blueprint_id' => $request->paper_blueprint_id,
                 'total_marks' => collect($request->questions)->sum('marks'),
                 'created_by' => auth()->id(),
-
             ]);
 
             /* DELETE OLD QUESTIONS */
