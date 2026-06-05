@@ -34,6 +34,10 @@ class User extends Authenticatable
         'login_end_date',
         'daily_login_start_time',
         'daily_login_end_time',
+        'current_session_id',
+        'last_activity_at',
+        'password_change_required',
+        'password_changed_at',
     ];
 
     /**
@@ -58,6 +62,8 @@ class User extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
             'login_enabled' => 'boolean',
+            'password_change_required' => 'boolean',
+            'password_changed_at' => 'datetime',
         ];
     }
 

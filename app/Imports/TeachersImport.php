@@ -55,6 +55,8 @@ class TeachersImport implements ToCollection
                 'is_active' => true,
                 'login_enabled' => true,
                 'login_start_date' => now()->toDateString(),
+                'password_change_required' => true,
+                'password_changed_at' => null,
             ]);
 
             Teacher::create([

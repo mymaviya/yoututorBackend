@@ -72,8 +72,24 @@ class AuthController extends Controller
             $user->save();
         }
 
-        if (!$user->allow_multiple_sessions) {
-            $user->tokens()->delete();
+        if (
+            !$user->allow_multiple_sessions &&
+            !empty($user->current_session_id) &&
+            !empty($user->last_activity_at)
+        ) {
+
+            $lastActivity = Carbon::parse($user->last_activity_at);
+
+            if (
+                $lastActivity->diffInMinutes(now())
+                < $user->session_timeout_minutes
+            ) {
+
+                return response()->json([
+                    'message' => 'This user is already logged in. Please log out before logging in here.',
+                    'code' => 'USER_ALREADY_LOGGED_IN'
+                ], 422);
+            }
         }
 
         try {
@@ -88,6 +104,10 @@ class AuthController extends Controller
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;
+        $user->update([
+            'current_session_id' => (string) Str::uuid(),
+            'last_activity_at' => now(),
+        ]);
 
         AuditService::log('Authentication', 'Login', 'User logged in successfully with email: ' . $user->email, null, null, $user->id);
 
@@ -145,7 +165,9 @@ class AuthController extends Controller
                 'address' => $user->address,
                 'role' => $user->role,
                 'role_slug' => $roleSlug,
-                'profile' => $user->profile ? asset('storage/' . $user->profile) : null
+                'profile' => $user->profile ? asset('storage/' . $user->profile) : null,
+                'password_change_required' => (bool) $user->password_change_required,
+
             ]
         ]);
     }
@@ -250,9 +272,24 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
-        $request->user()->tokens()->delete();
-        AuditService::log('Authentication', 'Logout', 'User logged out');
-        return response()->json(['message' => 'Logged out']);
+        $user = $request->user();
+
+        $user->update([
+            'current_session_id' => null,
+            'last_activity_at' => null,
+        ]);
+
+        $user->tokens()->delete();
+
+        AuditService::log(
+            'Authentication',
+            'Logout',
+            'User logged out'
+        );
+
+        return response()->json([
+            'message' => 'Logged out successfully.'
+        ]);
     }
 
 
@@ -402,5 +439,26 @@ class AuthController extends Controller
         }
 
         return null;
+    }
+
+    public function changeFirstPassword(Request $request)
+    {
+        $request->validate([
+            'password' => 'required|string|min:6|confirmed',
+        ]);
+
+        $user = $request->user();
+
+        $user->update([
+            'password' => Hash::make($request->password),
+            'password_change_required' => false,
+            'password_changed_at' => now(),
+
+
+        ]);
+
+        return response()->json([
+            'message' => 'Password changed successfully.',
+        ]);
     }
 }

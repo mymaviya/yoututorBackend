@@ -178,7 +178,7 @@ class QuestionPaperController extends Controller
                 'grade_id' => $request->grade_id,
                 'subject_id' => $request->subject_id,
                 'paper_blueprint_id' => $request->paper_blueprint_id,
-                'total_marks' => collect($request->questions)->sum('marks'),
+                'total_marks' => collect($request->questions)->sum(fn ($q) => (float) ($q['marks'] ?? 0)),
                 'created_by' => auth()->id(),
             ]);
 
@@ -191,11 +191,12 @@ class QuestionPaperController extends Controller
             foreach ($request->questions as $index => $item) {
 
                 QuestionPaperQuestion::create([
-
                     'question_paper_id' => $paper->id,
                     'question_id' => $item['question_id'],
-                    'marks' => $item['marks'],
-                    'sort_order' => $index + 1
+                    'marks' => $item['marks'] ?? 0,
+                    'section' => $item['section'] ?? 'Section A',
+                    'instructions' => $item['instructions'] ?? null,
+                    'sort_order' => $item['sort_order'] ?? ($index + 1),
                 ]);
             }
 

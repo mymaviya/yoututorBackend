@@ -400,19 +400,7 @@ class QuestionController extends Controller
                     ->store('questions', 'public');
             }
 
-
-            // update staus after rejection
-            if (auth()->user()->role === 'teacher') {
-                $data['status'] = 'pending';
-                $data['approved_by'] = null;
-                $data['approved_at'] = null;
-                $data['rejection_reason'] = null;
-            }
-
-            $question['matches'] = $request->matches ? json_decode($request->matches, true) : null;
-
-            /*UPDATE BASIC FIELDS*/
-            $question->update($request->only([
+            $updateData = $request->only([
                 'grade_id',
                 'subject_id',
                 'lesson_id',
@@ -424,11 +412,22 @@ class QuestionController extends Controller
                 'marks',
                 'answer',
                 'explanation',
-                'status',
-                'approved_by',
-                'approved_at',
-                'rejection_reason',
-            ]));
+            ]);
+
+            // If teacher edits a rejected question, send it back for approval
+            if (
+                auth()->user()->role === 'teacher' &&
+                $question->status === 'rejected'
+            ) {
+                $updateData['status'] = 'pending';
+                $updateData['approved_by'] = null;
+                $updateData['approved_at'] = null;
+                $updateData['rejection_reason'] = null;
+            }
+
+            $question->update($updateData);
+
+            $question['matches'] = $request->matches ? json_decode($request->matches, true) : null;
 
             // Update Match the Coloumn
 

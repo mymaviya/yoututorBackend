@@ -42,32 +42,34 @@ use App\Models\SidebarMenu;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
-
+Route::middleware('auth:sanctum')->post('/change-first-password', [AuthController::class, 'changeFirstPassword']);
 
 Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/logout', [AuthController::class, 'logout']);
+
+    Route::post('/heartbeat', function (Request $request) {
+        $request->user()->update([
+            'last_activity_at' => now(),
+        ]);
+    });
 
     Route::get('/current-user', function (Request $request) {
         $user = $request->user();
 
         $user->loadMissing('roleData.permissions');
 
-        $permissionSlugs = $user->role === 'admin'
+        $roleSlug = $user->roleData?->slug ?? $user->role;
+
+        $permissionSlugs = $roleSlug === 'admin'
             ? Permission::pluck('slug')
             : ($user->roleData?->permissions->pluck('slug') ?? collect());
 
-        $roleSlug = $user->roleData?->slug ?? $user->role;
-
         $sidebarMenus = SidebarMenu::where('is_active', true)
+            ->where('show_in_sidebar', true)
             ->orderBy('sort_order')
             ->get()
-            ->filter(function ($menu) use ($permissionSlugs, $roleSlug) {
-
-                if ($menu->role_slug && $menu->role_slug !== $roleSlug) {
-                    return false;
-                }
-
+            ->filter(function ($menu) use ($permissionSlugs) {
                 if (!$menu->permission_slug) {
                     return true;
                 }
@@ -100,6 +102,7 @@ Route::middleware('auth:sanctum')->group(function () {
             'permissions' => $permissionSlugs->values(),
             'sidebar_menus' => $sidebarMenus,
             'dashboard_route' => $dashboardRoute,
+            'password_change_required' => (bool) $user->password_change_required,
         ]);
     });
 
@@ -265,11 +268,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/sidebar-menus/reorder', [SidebarMenuController::class, 'reorder']);
         Route::apiResource('sidebar-menus', SidebarMenuController::class);
 
-        Route::post('question-papers/{id}/finalize',[QuestionPaperController::class, 'finalize']);
-        Route::post('question-papers/{id}/reopen',[QuestionPaperController::class, 'reopen']);
-        Route::post('question-papers/{id}/printed',[QuestionPaperController::class, 'markPrinted']);
-        Route::post('question-papers/{id}/archive',[QuestionPaperController::class, 'archive']);
-
+        Route::post('question-papers/{id}/finalize', [QuestionPaperController::class, 'finalize']);
+        Route::post('question-papers/{id}/reopen', [QuestionPaperController::class, 'reopen']);
+        Route::post('question-papers/{id}/printed', [QuestionPaperController::class, 'markPrinted']);
+        Route::post('question-papers/{id}/archive', [QuestionPaperController::class, 'archive']);
     });
 
     Route::middleware('permission:approve_questions')->group(function () {

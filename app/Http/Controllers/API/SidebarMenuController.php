@@ -13,7 +13,27 @@ class SidebarMenuController extends Controller
 
     public function index()
     {
-        return SidebarMenu::orderBy('sort_order')->get();
+        $user = auth()->user();
+
+        $permissionSlugs = $user->roles()
+            ->with('permissions')
+            ->get()
+            ->flatMap(fn($role) => $role->permissions->pluck('slug'))
+            ->unique()
+            ->values()
+            ->toArray();
+
+        $menus = SidebarMenu::query()
+            ->where('is_active', true)
+            ->where('show_in_sidebar', true)
+            ->where(function ($query) use ($permissionSlugs) {
+                $query->whereNull('permission_slug')
+                    ->orWhereIn('permission_slug', $permissionSlugs);
+            })
+            ->orderBy('sort_order')
+            ->get();
+
+        return response()->json($menus);
     }
 
     public function store(Request $request)

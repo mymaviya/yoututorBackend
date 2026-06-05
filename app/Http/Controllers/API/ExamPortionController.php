@@ -52,6 +52,30 @@ class ExamPortionController extends Controller
         ]);
 
         $created = [];
+        $duplicates = [];
+
+        foreach ($data['exam_name_ids'] as $examNameId) {
+
+            $exists = ExamPortion::where('grade_id', $data['grade_id'])
+                ->where('subject_id', $data['subject_id'])
+                ->where('exam_name_id', $examNameId)
+                ->exists();
+
+            if ($exists) {
+                $duplicates[] = $examNameId;
+            }
+        }
+
+        if (!empty($duplicates)) {
+
+            $examNames = \App\Models\ExamName::whereIn('id', $duplicates)
+                ->pluck('name')
+                ->implode(', ');
+
+            return response()->json([
+                'message' => 'Portion already exists for: ' . $examNames,
+            ], 500);
+        }
 
         foreach ($data['exam_name_ids'] as $examNameId) {
             $portion = ExamPortion::create([
@@ -110,6 +134,18 @@ class ExamPortionController extends Controller
             'exam_name_ids.*' => 'exists:exam_names,id',
             'due_date' => 'nullable|date',
         ]);
+
+        $exists = ExamPortion::where('grade_id', $data['grade_id'])
+            ->where('subject_id', $data['subject_id'])
+            ->where('exam_name_id', $data['exam_name_ids'][0])
+            ->where('id', '!=', $portion->id)
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'message' => 'This Grade, Subject and Exam combination already exists.'
+            ], 500);
+        }
 
         $portion->update([
             'teacher_id' => $data['teacher_id'],
