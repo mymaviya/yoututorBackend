@@ -213,6 +213,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/question-approvals', [QuestionApprovalController::class, 'index']);
         Route::post('/question-approvals/{question}/reject', [QuestionApprovalController::class, 'reject']);
+        Route::post('/question-approvals/{question}/approve', [QuestionApprovalController::class, 'approve']);
 
         Route::apiResource('exam-portions', ExamPortionController::class);
         Route::post('/exam-portions/{examPortion}/approve', [ExamPortionController::class, 'approve']);
@@ -274,9 +275,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('question-papers/{id}/archive', [QuestionPaperController::class, 'archive']);
     });
 
-    Route::middleware('permission:approve_questions')->group(function () {
-        Route::post('/question-approvals/{question}/approve', [QuestionApprovalController::class, 'approve']);
-    });
+
 
     Route::middleware('role:teacher')->group(function () {
         Route::get('/teacher/dashboard', [TeacherDashboardController::class, 'index']);
