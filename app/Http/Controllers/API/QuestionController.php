@@ -5,540 +5,314 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\Question;
 use App\Models\QuestionOption;
+use App\Models\QuestionTypeMaster;
 use App\Models\TeacherQuestionTask;
-use App\Models\QuestionMatchPair;
-use App\Imports\QuestionTypesImport;
-use Maatwebsite\Excel\Facades\Excel;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
-use App\Services\AuditService;
-
+use Illuminate\Support\Facades\Storage;
 
 class QuestionController extends Controller
 {
-    /*
-    |--------------------------------------------------------------------------
-    | GET ALL QUESTIONS (FILTER + PAGINATION)
-    |--------------------------------------------------------------------------
-    */
+    private function resolveQuestionTypeId(Request $request): ?int
+    {
+        if ($request->filled('question_type_master_id')) {
+            return (int) $request->question_type_master_id;
+        }
+
+        $type = $request->input('type') ?? $request->input('question_type');
+
+        if (!$type) {
+            return null;
+        }
+
+        if (is_numeric($type)) {
+            return (int) $type;
+        }
+
+        return QuestionTypeMaster::where('slug', $type)->orWhere('name', $type)->value('id');
+    }
+
+    private function questionTypeSlug($question): ?string
+    {
+        return $question->type?->slug;
+    }
 
     public function index(Request $request)
     {
-        $query = Question::with([
-            'grade',
-            'subject',
-            'lesson',
-            'options',
-            'questionType',
-            'languageItems',
-            'matchPairs',
-            'creator',
+        $query = Question::with(['grade', 'stream', 'subject', 'lesson', 'type', 'options', 'languageItems', 'matchPairs', 'creator']);
 
+        $isForPaper = $request->boolean('for_paper');
 
-        ]);
-
-
-        $isForPaper = $request->filled('for_paper') && $request->for_paper == 1;
-
-        if (auth()->user()->role !== 'admin' && !$isForPaper) {
+        if (auth()->check() && auth()->user()->role !== 'admin' && !$isForPaper) {
             $query->where('created_by', auth()->id());
         }
 
         if ($isForPaper) {
             $query->where('status', 'approved');
-
-            if (auth()->user()->role === 'teacher') {
-                $teacher = auth()->user()->teacher;
-
-                if (!$teacher) {
-                    return response()->json([
-                        'message' => 'Teacher profile not found.',
-                    ], 404);
-                }
-
-                $assignments = $teacher->assignments()
-                    ->select('grade_id', 'subject_id')
-                    ->get();
-
-                if ($assignments->isEmpty()) {
-                    $query->whereRaw('1 = 0');
-                } else {
-                    $query->where(function ($q) use ($assignments) {
-                        foreach ($assignments as $assignment) {
-                            $q->orWhere(function ($inner) use ($assignment) {
-                                $inner
-                                    ->where('grade_id', $assignment->grade_id)
-                                    ->where('subject_id', $assignment->subject_id);
-                            });
-                        }
-                    });
-                }
-            }
         }
 
-
-
-        if ($request->status) {
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
-        if ($request->grade_id) {
+        if ($request->filled('grade_id')) {
             $query->where('grade_id', $request->grade_id);
         }
 
-        if ($request->subject_id) {
+        if ($request->filled('stream_id')) {
+            $query->where('stream_id', $request->stream_id);
+        }
+
+        if ($request->filled('subject_id')) {
             $query->where('subject_id', $request->subject_id);
         }
 
-        if ($request->lesson_id) {
+        if ($request->filled('lesson_id')) {
             $query->where('lesson_id', $request->lesson_id);
         }
 
-        if ($request->type) {
-            $query->where('type', $request->type);
+        if ($request->filled('question_type_master_id')) {
+            $query->where('question_type_master_id', $request->question_type_master_id);
+        } elseif ($request->filled('type')) {
+            $typeId = QuestionTypeMaster::where('slug', $request->type)->orWhere('name', $request->type)->value('id');
+            if ($typeId) {
+                $query->where('question_type_master_id', $typeId);
+            }
         }
 
-        if ($request->difficulty) {
+        if ($request->filled('difficulty')) {
             $query->where('difficulty', $request->difficulty);
         }
 
-        if ($request->search) {
+        if ($request->filled('search')) {
             $query->where('question', 'like', '%' . $request->search . '%');
         }
 
-        if ($request->boolean('for_paper')) {
-            $query->where('status', 'approved');
-        }
-
-        return $query
-            ->latest()
-            ->paginate((int) $request->input('per_page', 10));
+        return $query->latest()->paginate((int) $request->input('per_page', 50));
     }
-
-    /* STORE QUESTION */
 
     public function store(Request $request)
     {
-        DB::beginTransaction();
+        $questionTypeId = $this->resolveQuestionTypeId($request);
 
+        if (!$questionTypeId) {
+            return response()->json([
+                'message' => 'Invalid question type.',
+                'errors' => ['type' => ['Invalid question type.']],
+            ], 422);
+        }
 
-
-        $request->validate([
+        $data = $request->validate([
             'grade_id' => 'required|exists:grades,id',
+            'stream_id' => 'nullable|exists:streams,id',
             'subject_id' => 'required|exists:subjects,id',
-            'lesson_id' => 'required|exists:lessons,id',
+            'lesson_id' => 'nullable|exists:lessons,id',
             'task_id' => 'nullable|exists:teacher_question_tasks,id',
             'question' => 'required',
-            'type' => 'required',
-            'difficulty' => 'required',
-            'bloom_level' => 'required',
+            'difficulty' => 'required|string',
+            'bloom_level' => 'nullable|string',
             'marks' => 'required|numeric',
-            'options' => 'nullable|array'
+            'answer' => 'nullable',
+            'explanation' => 'nullable',
+            'options' => 'nullable|array',
+            'matches' => 'nullable',
+            'content_items' => 'nullable',
+            'question_image' => 'nullable|image|max:4096',
         ]);
 
-        // Restricted Teachers only to update thier assigned classes and Subjects
-
-        if (auth()->user()->role === 'teacher') {
-            $allowed = auth()->user()
-                ->teacher
-                ->assignments()
-                ->where('grade_id', $request->grade_id)
-                ->where('subject_id', $request->subject_id)
-                ->exists();
-
-            if (!$allowed) {
-                return response()->json([
-                    'message' => 'You are not assigned to this grade and subject.'
-                ], 403);
-            }
-        }
-
-        // Restricted Teachers only to add Number of Assinged questions in thier category
-
-        if (auth()->user()->role === 'teacher') {
-
-            $teacher = auth()->user()->teacher;
-
-            $taskQuery = TeacherQuestionTask::where('teacher_id', $teacher->id)
-                ->where('grade_id', $request->grade_id)
-                ->where('subject_id', $request->subject_id)
-                ->where('question_type', $request->type)
-                ->where('difficulty', $request->difficulty);
-
-            if ($request->filled('lesson_id')) {
-                $taskQuery->where(function ($q) use ($request) {
-                    $q->whereNull('lesson_id')
-                        ->orWhere('lesson_id', $request->lesson_id);
-                });
-            }
-
-            if ($request->filled('task_id')) {
-                $taskQuery->where('id', $request->task_id);
-            }
-
-            $task = $taskQuery->first();
-
-            if (!$task) {
-                return response()->json([
-                    'message' => 'No assigned task found for this grade, subject, type and difficulty.'
-                ], 403);
-            }
-
-            $createdCount = Question::where('created_by', auth()->id())
-                ->where('grade_id', $task->grade_id)
-                ->where('subject_id', $task->subject_id)
-                ->when($task->lesson_id, function ($query) use ($task) {
-                    $query->where('lesson_id', $task->lesson_id);
-                })
-                ->where('type', $task->question_type)
-                ->where('difficulty', $task->difficulty)
-                ->count();
-
-            $newCount = 1;
-
-            if ($request->type === 'match_column' && $request->matches) {
-                $newCount = count(json_decode($request->matches, true) ?? []);
-            }
-
-            if (($createdCount + $newCount) > $task->target_count) {
-                return response()->json([
-                    'message' => "This task allows only {$task->target_count} questions. You have already created {$createdCount}. You can add only " . max($task->target_count - $createdCount, 0) . " more."
-                ], 403);
-            }
-        }
-
-        /* QUESTION IMAGE */
-
-        $questionImagePath = null;
-
-        if ($request->hasFile('question_image')) {
-
-            $questionImagePath = $request->file('question_image')
-                ->store('questions', 'public');
-        }
-
-        /* CREATE QUESTION */
-
-        $question = Question::create([
-            'grade_id' => $request->grade_id,
-            'subject_id' => $request->subject_id,
-            'lesson_id' => $request->lesson_id,
-            'question' => $request->question,
-            'type' => $request->type,
-            'difficulty' => $request->difficulty,
-            'bloom_level' => $request->bloom_level,
-            'marks' => $request->marks,
-            'answer' => $request->answer,
-            'explanation' => $request->explanation,
-            'question_image' => $questionImagePath,
-            'created_by' => auth()->id(),
-            'status' => auth()->user()->role === 'admin' ? 'approved' : 'pending',
-        ]);
-
-        $contentBasedTypes = [
-            'word_meaning',
-            'make_sentence',
-            'difficult_words',
-        ];
-
-        if (in_array($request->type, $contentBasedTypes)) {
-            $items = json_decode($request->content_items, true) ?? [];
-
-            foreach ($items as $item) {
-                if (empty($item['word'])) {
-                    continue;
-                }
-
-                $question->languageItems()->create([
-                    'word' => $item['word'],
-                    'answer' => $item['meaning']
-                        ?? $item['sentence']
-                        ?? $item['answer']
-                        ?? null,
-                ]);
-            }
-        }
-
-
-        // MATCH THE COLUMN
-
-        if ($request->type === 'match_column' && $request->matches) {
-            $question->matchPairs()->delete();
-
-            $matches = json_decode($request->matches, true);
-
-            foreach ($matches as $index => $pair) {
-                $question->matchPairs()->create([
-                    'left_text' => $pair['left'] ?? '',
-                    'right_text' => $pair['right'] ?? '',
-                    'sort_order' => $index + 1,
-                ]);
-            }
-        }
-
-        /* OPTIONS (MCQ) */
-
-        if ($request->options) {
-
-            foreach ($request->options as $index => $opt) {
-
-                $optionImage = null;
-
-                if ($request->hasFile("options.$index.option_image")) {
-
-                    $optionImage = $request->file("options.$index.option_image")
-                        ->store('question-options', 'public');
-                }
-
-                QuestionOption::create([
-                    'question_id' => $question->id,
-
-                    'option_text' => $opt['option_text'] ?? null,
-
-                    'option_image' => $optionImage,
-
-                    'is_correct' => $opt['is_correct'] ?? false
-                ]);
-            }
-        }
-
-        DB::commit();
-        AuditService::log('Questions', 'Create', 'Question created', null, $question->toArray());
-
-        $admins = User::where('role', 'admin')->get();
-
-        foreach ($admins as $admin) {
-            notifyUser(
-                $admin->id,
-                'New Question Submitted',
-                auth()->user()->name . ' has submitted a question for approval.',
-                'question_submitted',
-                '/question-approvals'
-            );
-        }
-
-        return response()->json([
-            'message' => 'Question created successfully',
-            'data' => $question->load('options')
-        ]);
-    }
-
-    /* SHOW SINGLE QUESTION */
-
-    public function show($id)
-    {
-        return Question::with([
-            'grade',
-            'subject',
-            'lesson',
-            'options',
-            'matchPairs',
-            'questionType',
-            'languageItems',
-            'creator',
-            'approver',
-        ])->findOrFail($id);
-    }
-
-
-    public function import(Request $request)
-    {
-        $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls,csv',
-        ]);
-
-        $import = new QuestionTypesImport();
-
-        Excel::import($import, $request->file('file'));
-
-        return response()->json([
-            'message' => 'Question types import completed',
-            'imported' => $import->imported,
-            'skipped' => $import->skipped,
-            'errors' => $import->errors,
-        ]);
-    }
-
-    /* UPDATE QUESTION */
-
-    public function update(Request $request, $id)
-    {
-        DB::beginTransaction();
-
-        try {
-
-            $question = Question::findOrFail($id);
-
-            $oldQuestion = $question->toArray();
-
+        return DB::transaction(function () use ($request, $data, $questionTypeId) {
             if (auth()->user()->role === 'teacher') {
-                $allowed = auth()->user()
-                    ->teacher
-                    ->assignments()
-                    ->where('grade_id', $request->grade_id)
-                    ->where('subject_id', $request->subject_id)
+                $allowed = auth()->user()->teacherAssignments()
+                    ->where('grade_id', $data['grade_id'])
+                    ->where('subject_id', $data['subject_id'])
+                    ->when($data['stream_id'] ?? null, fn ($q) => $q->where('stream_id', $data['stream_id']))
                     ->exists();
 
                 if (!$allowed) {
-                    return response()->json([
-                        'message' => 'You are not assigned to this grade and subject.'
-                    ], 403);
+                    return response()->json(['message' => 'You are not assigned to this grade, stream and subject.'], 403);
+                }
+
+                if ($request->filled('task_id')) {
+                    $task = TeacherQuestionTask::where('id', $request->task_id)
+                        ->where('teacher_id', auth()->id())
+                        ->where('question_type_master_id', $questionTypeId)
+                        ->first();
+
+                    if (!$task) {
+                        return response()->json(['message' => 'No assigned task found for this question type.'], 403);
+                    }
+
+                    $createdCount = Question::where('created_by', auth()->id())
+                        ->where('grade_id', $task->grade_id)
+                        ->where('subject_id', $task->subject_id)
+                        ->where('question_type_master_id', $task->question_type_master_id)
+                        ->when($task->stream_id, fn ($q) => $q->where('stream_id', $task->stream_id))
+                        ->when($task->lesson_id, fn ($q) => $q->where('lesson_id', $task->lesson_id))
+                        ->count();
+
+                    if ($createdCount >= $task->target_count) {
+                        return response()->json(['message' => "This task allows only {$task->target_count} questions."], 403);
+                    }
                 }
             }
 
-            /* UPDATE QUESTION IMAGE */
-
-            if ($request->hasFile('question_image')) {
-
-                if ($question->question_image) {
-                    Storage::disk('public')->delete($question->question_image);
-                }
-
-                $question->question_image = $request->file('question_image')
-                    ->store('questions', 'public');
-            }
-
-            $updateData = $request->only([
-                'grade_id',
-                'subject_id',
-                'lesson_id',
-                'matches',
-                'question',
-                'type',
-                'bloom_level',
-                'difficulty',
-                'marks',
-                'answer',
-                'explanation',
+            $question = Question::create([
+                'grade_id' => $data['grade_id'],
+                'stream_id' => $data['stream_id'] ?? null,
+                'subject_id' => $data['subject_id'],
+                'lesson_id' => $data['lesson_id'] ?? null,
+                'question_type_master_id' => $questionTypeId,
+                'question' => $data['question'],
+                'difficulty' => $data['difficulty'],
+                'bloom_level' => $data['bloom_level'] ?? null,
+                'marks' => $data['marks'],
+                'answer' => $data['answer'] ?? null,
+                'explanation' => $data['explanation'] ?? null,
+                'created_by' => auth()->id(),
+                'status' => auth()->user()->role === 'admin' ? 'approved' : 'pending',
             ]);
 
-            // If teacher edits a rejected question, send it back for approval
-            if (
-                auth()->user()->role === 'teacher' &&
-                $question->status === 'rejected'
-            ) {
-                $updateData['status'] = 'pending';
-                $updateData['approved_by'] = null;
-                $updateData['approved_at'] = null;
-                $updateData['rejection_reason'] = null;
+            if ($request->hasFile('question_image')) {
+                $question->images()->create([
+                    'image_path' => $request->file('question_image')->store('questions', 'public'),
+                ]);
             }
 
-            $question->update($updateData);
+            $typeSlug = $question->type?->slug;
 
-            $question['matches'] = $request->matches ? json_decode($request->matches, true) : null;
+            if (in_array($typeSlug, ['word_meaning', 'make_sentence', 'difficult_words'])) {
+                foreach (json_decode($request->content_items, true) ?? [] as $item) {
+                    if (!empty($item['word'])) {
+                        $question->languageItems()->create([
+                            'word' => $item['word'],
+                            'answer' => $item['meaning'] ?? $item['sentence'] ?? $item['answer'] ?? null,
+                        ]);
+                    }
+                }
+            }
 
-            // Update Match the Coloumn
-
-            if ($request->type === 'match_column' && $request->matches) {
-                $question->matchPairs()->delete();
-
-                $matches = json_decode($request->matches, true);
-
-                foreach ($matches as $index => $pair) {
+            if ($typeSlug === 'match_column' && $request->matches) {
+                foreach (json_decode($request->matches, true) ?? [] as $index => $pair) {
                     $question->matchPairs()->create([
-                        'left_text' => $pair['left'] ?? '',
-                        'right_text' => $pair['right'] ?? '',
+                        'left_value' => $pair['left'] ?? '',
+                        'right_value' => $pair['right'] ?? '',
                         'sort_order' => $index + 1,
                     ]);
                 }
             }
 
-            /*REPLACE OPTIONS*/
+            foreach ($request->options ?? [] as $index => $opt) {
+                $optionImage = null;
 
-            if ($request->options) {
+                if ($request->hasFile("options.$index.option_image")) {
+                    $optionImage = $request->file("options.$index.option_image")->store('question-options', 'public');
+                }
 
-                // delete old options
+                QuestionOption::create([
+                    'question_id' => $question->id,
+                    'option_text' => $opt['option_text'] ?? '',
+                    'option_image' => $optionImage,
+                    'is_correct' => $opt['is_correct'] ?? false,
+                    'sort_order' => $index + 1,
+                ]);
+            }
+
+            User::where('role', 'admin')->get()->each(function ($admin) {
+                notifyUser($admin->id, 'New Question Submitted', 'A new question has been submitted for approval.', 'question_submitted', '/questions/approvals');
+            });
+
+            return response()->json([
+                'message' => 'Question created successfully',
+                'data' => $question->load(['grade', 'stream', 'subject', 'lesson', 'type', 'options', 'images', 'matchPairs']),
+            ], 201);
+        });
+    }
+
+    public function show($id)
+    {
+        return Question::with(['grade', 'stream', 'subject', 'lesson', 'type', 'options', 'images', 'matchPairs', 'languageItems', 'creator'])->findOrFail($id);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $question = Question::findOrFail($id);
+        $questionTypeId = $this->resolveQuestionTypeId($request) ?: $question->question_type_master_id;
+
+        $data = $request->validate([
+            'grade_id' => 'required|exists:grades,id',
+            'stream_id' => 'nullable|exists:streams,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'lesson_id' => 'nullable|exists:lessons,id',
+            'question' => 'required',
+            'difficulty' => 'required|string',
+            'bloom_level' => 'nullable|string',
+            'marks' => 'required|numeric',
+            'answer' => 'nullable',
+            'explanation' => 'nullable',
+            'options' => 'nullable|array',
+            'matches' => 'nullable',
+        ]);
+
+        return DB::transaction(function () use ($request, $question, $data, $questionTypeId) {
+            $question->update([
+                'grade_id' => $data['grade_id'],
+                'stream_id' => $data['stream_id'] ?? null,
+                'subject_id' => $data['subject_id'],
+                'lesson_id' => $data['lesson_id'] ?? null,
+                'question_type_master_id' => $questionTypeId,
+                'question' => $data['question'],
+                'difficulty' => $data['difficulty'],
+                'bloom_level' => $data['bloom_level'] ?? null,
+                'marks' => $data['marks'],
+                'answer' => $data['answer'] ?? null,
+                'explanation' => $data['explanation'] ?? null,
+                'status' => auth()->user()->role === 'admin' ? $question->status : 'pending',
+            ]);
+
+            if ($request->has('options')) {
                 $question->options()->delete();
-
-                foreach ($request->options as $index => $opt) {
-
-                    $optionImage = null;
-
-                    if ($request->hasFile("options.$index.option_image")) {
-
-                        $optionImage = $request->file("options.$index.option_image")
-                            ->store('question-options', 'public');
-                    }
-
+                foreach ($request->options ?? [] as $index => $opt) {
                     $question->options()->create([
-                        'option_text' => $opt['option_text'] ?? null,
-                        'option_image' => $optionImage,
-                        'is_correct' => $opt['is_correct'] ?? false
+                        'option_text' => $opt['option_text'] ?? '',
+                        'option_image' => null,
+                        'is_correct' => $opt['is_correct'] ?? false,
+                        'sort_order' => $index + 1,
                     ]);
                 }
             }
 
-            $contentBasedTypes = [
-                'word_meaning',
-                'make_sentence',
-                'difficult_words',
-            ];
-
-            if (in_array($request->type, $contentBasedTypes)) {
-                $items = json_decode($request->content_items, true) ?? [];
-
-                $question->languageItems()->delete();
-
-                foreach ($items as $item) {
-                    if (empty($item['word'])) {
-                        continue;
-                    }
-
-                    $question->languageItems()->create([
-                        'word' => $item['word'],
-                        'answer' => $item['meaning']
-                            ?? $item['sentence']
-                            ?? $item['answer']
-                            ?? null,
+            if ($request->has('matches')) {
+                $question->matchPairs()->delete();
+                foreach (json_decode($request->matches, true) ?? [] as $index => $pair) {
+                    $question->matchPairs()->create([
+                        'left_value' => $pair['left'] ?? '',
+                        'right_value' => $pair['right'] ?? '',
+                        'sort_order' => $index + 1,
                     ]);
                 }
             }
-
-            DB::commit();
-
-            AuditService::log('Questions', 'Update', 'Question updated', $oldQuestion, $question->toArray());
 
             return response()->json([
                 'message' => 'Question updated successfully',
-                'data' => $question->load('options')
+                'data' => $question->fresh()->load(['grade', 'stream', 'subject', 'lesson', 'type', 'options', 'images', 'matchPairs']),
             ]);
-        } catch (\Exception $e) {
-
-            DB::rollback();
-
-            return response()->json([
-                'message' => 'Update failed',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        });
     }
-
-    /* DELETE QUESTION */
-
 
     public function destroy($id)
     {
-        $question = Question::findOrFail($id);
+        Question::findOrFail($id)->delete();
+        return response()->json(['message' => 'Question deleted successfully']);
+    }
 
-        // delete images
-        if ($question->question_image) {
-            Storage::disk('public')->delete($question->question_image);
-        }
+    public function import(Request $request)
+    {
+        return response()->json(['message' => 'Question import needs V2 update.'], 501);
+    }
 
-        foreach ($question->options as $opt) {
-            if ($opt->option_image) {
-                Storage::disk('public')->delete($opt->option_image);
-            }
-        }
-
-        AuditService::log('Questions', 'Delete', 'Question deleted', $question->toArray(), null);
-
-        $question->delete();
-
-        return response()->json([
-            'message' => 'Question deleted successfully'
-        ]);
+    public function downloadTemplate()
+    {
+        return response()->json(['message' => 'Question import template needs V2 update.'], 501);
     }
 }

@@ -3,9 +3,10 @@
 namespace App\Http\Controllers\API;
 
 use App\Http\Controllers\Controller;
-use App\Models\Role;
 use App\Models\Permission;
+use App\Models\Role;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class RoleController extends Controller
 {
@@ -23,52 +24,46 @@ class RoleController extends Controller
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255|unique:roles,name',
-            'slug' => 'required|string|max:255|unique:roles,slug',
-            'bypass_device_restriction' => 'boolean',
-            'permissions' => 'nullable|array',
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255', 'unique:roles,name'],
+            'slug' => ['required', 'string', 'max:255', 'unique:roles,slug'],
+            'bypass_device_restriction' => ['nullable', 'boolean'],
+            'permissions' => ['nullable', 'array'],
+            'permissions.*' => ['required', 'string', 'exists:permissions,slug'],
         ]);
 
         $role = Role::create([
-            'name' => $validated['name'],
-            'slug' => $validated['slug'],
-            'bypass_device_restriction' => $validated['bypass_device_restriction'],
+            'name' => $data['name'],
+            'slug' => $data['slug'],
+            'bypass_device_restriction' => (bool) ($data['bypass_device_restriction'] ?? false),
+            'is_active' => true,
         ]);
 
-        if ($request->permissions) {
-
-            $permissionIds = Permission::whereIn(
-                'slug',
-                $request->permissions
-            )->pluck('id');
-
-            $role->permissions()->sync($permissionIds);
-        }
+        $this->syncPermissionSlugs($role, $data['permissions'] ?? []);
 
         return response()->json([
             'message' => 'Role created successfully',
             'data' => $role->load('permissions'),
-        ]);
+        ], 201);
     }
 
     public function update(Request $request, Role $role)
     {
         $data = $request->validate([
-            'name' => 'required|string|max:255',
-            'slug' => 'required|string|max:255|unique:roles,slug,' . $role->id,
-            'bypass_device_restriction' => 'boolean',
-            'permissions' => 'array',
-            'permissions.*' => 'exists:permissions,id',
+            'name' => ['required', 'string', 'max:255', Rule::unique('roles', 'name')->ignore($role->id)],
+            'slug' => ['required', 'string', 'max:255', Rule::unique('roles', 'slug')->ignore($role->id)],
+            'bypass_device_restriction' => ['nullable', 'boolean'],
+            'permissions' => ['nullable', 'array'],
+            'permissions.*' => ['required', 'string', 'exists:permissions,slug'],
         ]);
 
         $role->update([
             'name' => $data['name'],
             'slug' => $data['slug'],
-            'bypass_device_restriction' => $data['bypass_device_restriction'] ?? false,
+            'bypass_device_restriction' => (bool) ($data['bypass_device_restriction'] ?? false),
         ]);
 
-        $role->permissions()->sync($data['permissions'] ?? []);
+        $this->syncPermissionSlugs($role, $data['permissions'] ?? []);
 
         return response()->json([
             'message' => 'Role updated successfully',
@@ -79,26 +74,29 @@ class RoleController extends Controller
     public function permissions(Role $role)
     {
         return response()->json([
-            'permissions' => $role->permissions()->pluck('slug'),
+            'permissions' => $role->permissions()->pluck('slug')->values(),
         ]);
     }
 
     public function syncPermissions(Request $request, Role $role)
     {
         $data = $request->validate([
-            'permissions' => 'nullable|array',
-            'bypass_device_restriction' => 'boolean',
+            'permissions' => ['nullable', 'array'],
+            'permissions.*' => ['required', 'string', 'exists:permissions,slug'],
+            'bypass_device_restriction' => ['nullable', 'boolean'],
         ]);
 
-        $permissionIds = Permission::whereIn(
-            'slug',
-            $data['permissions'] ?? []
-        )->pluck('id');
+        if ($request->has('bypass_device_restriction')) {
+            $role->update([
+                'bypass_device_restriction' => (bool) $data['bypass_device_restriction'],
+            ]);
+        }
 
-        $role->permissions()->sync($permissionIds);
+        $this->syncPermissionSlugs($role, $data['permissions'] ?? []);
 
         return response()->json([
             'message' => 'Role permissions updated successfully',
+            'data' => $role->fresh()->load('permissions'),
         ]);
     }
 
@@ -109,5 +107,14 @@ class RoleController extends Controller
         return response()->json([
             'message' => 'Role deleted successfully',
         ]);
+    }
+
+    private function syncPermissionSlugs(Role $role, array $permissionSlugs): void
+    {
+        $permissionIds = Permission::whereIn('slug', $permissionSlugs)
+            ->pluck('id')
+            ->toArray();
+
+        $role->permissions()->sync($permissionIds);
     }
 }

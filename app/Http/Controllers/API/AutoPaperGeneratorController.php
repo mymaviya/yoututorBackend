@@ -16,15 +16,12 @@ class AutoPaperGeneratorController extends Controller
             'lesson_id' => 'nullable|exists:lessons,id',
         ]);
 
-        $blueprint = PaperBlueprint::with(['sections', 'bloomLevels'])
-            ->findOrFail($data['blueprint_id']);
+        $blueprint = PaperBlueprint::with(['sections.questionType'])->findOrFail($data['blueprint_id']);
 
         $usedQuestionIds = [];
         $sections = [];
-        $hasBloomDistribution = $blueprint->bloomLevels->count() > 0;
 
         foreach ($blueprint->sections as $section) {
-
             $sectionName = $section->section_name;
 
             if (!isset($sections[$sectionName])) {
@@ -36,110 +33,40 @@ class AutoPaperGeneratorController extends Controller
                 ];
             }
 
-            if ($hasBloomDistribution) {
-                $questions = collect();
+            $questions = Question::with(['options', 'matchPairs', 'type'])
+                ->where('status', 'approved')
+                ->where('grade_id', $blueprint->grade_id)
+                ->where('subject_id', $blueprint->subject_id)
+                ->where('question_type_master_id', $section->question_type_master_id)
+                ->when($blueprint->stream_id, fn ($q) => $q->where('stream_id', $blueprint->stream_id))
+                ->when($data['lesson_id'] ?? null, fn ($q) => $q->where('lesson_id', $data['lesson_id']))
+                ->when($section->difficulty, fn ($q) => $q->where('difficulty', $section->difficulty))
+                ->whereNotIn('id', $usedQuestionIds)
+                ->inRandomOrder()
+                ->take($section->question_count)
+                ->get();
 
-                foreach ($blueprint->bloomLevels as $bloom) {
-                    $count = (int) round(
-                        ($section->question_count * $bloom->percentage) / 100
-                    );
+            $usedQuestionIds = array_merge($usedQuestionIds, $questions->pluck('id')->toArray());
 
-                    if ($count <= 0) {
-                        continue;
-                    }
-
-                    $picked = Question::with(['options', 'matchPairs'])
-                        ->where('status', 'approved')
-                        ->where('grade_id', $blueprint->grade_id)
-                        ->where('subject_id', $blueprint->subject_id)
-                        ->where('type', $section->question_type)
-                        ->where('bloom_level', $bloom->bloom_level)
-                        ->when(!empty($section->difficulty), function ($q) use ($section) {
-                            $q->where('difficulty', $section->difficulty);
-                        })
-                        ->whereNotIn('id', $usedQuestionIds)
-                        ->inRandomOrder()
-                        ->take($count)
-                        ->get();
-
-                    $usedQuestionIds = array_merge(
-                        $usedQuestionIds,
-                        $picked->pluck('id')->toArray()
-                    );
-
-                    $questions = $questions->merge($picked);
-                }
-
-                // Fill remaining if rounding gives less than required
-                $remaining = $section->question_count - $questions->count();
-
-                if ($remaining > 0) {
-                    $extra = Question::with(['options', 'matchPairs'])
-                        ->where('status', 'approved')
-                        ->where('grade_id', $blueprint->grade_id)
-                        ->where('subject_id', $blueprint->subject_id)
-                        ->where('type', $section->question_type)
-                        ->when(!empty($section->difficulty), function ($q) use ($section) {
-                            $q->where('difficulty', $section->difficulty);
-                        })
-                        ->whereNotIn('id', $usedQuestionIds)
-                        ->inRandomOrder()
-                        ->take($remaining)
-                        ->get();
-
-                    $usedQuestionIds = array_merge(
-                        $usedQuestionIds,
-                        $extra->pluck('id')->toArray()
-                    );
-
-                    $questions = $questions->merge($extra);
-                }
-            } else {
-                $questions = Question::with(['options', 'matchPairs'])
-                    ->where('status', 'approved')
-                    ->where('grade_id', $blueprint->grade_id)
-                    ->where('subject_id', $blueprint->subject_id)
-                    ->where('type', $section->question_type)
-                    ->when(!empty($section->difficulty), function ($q) use ($section) {
-                        $q->where('difficulty', $section->difficulty);
-                    })
-                    ->when(!empty($section->bloom_level), function ($q) use ($section) {
-                        $q->where('bloom_level', $section->bloom_level);
-                    })
-                    ->whereNotIn('id', $usedQuestionIds)
-                    ->inRandomOrder()
-                    ->take($section->question_count)
-                    ->get();
-
-                $usedQuestionIds = array_merge(
-                    $usedQuestionIds,
-                    $questions->pluck('id')->toArray()
-                );
-            }
-
-            // add marks here
             $questions = $questions->map(function ($question) use ($section) {
                 $question->marks = $section->marks_per_question;
+                $question->type_slug = $question->type?->slug;
                 return $question;
             });
 
-            // then add to sections array
             $sections[$sectionName]['groups'][] = [
-                'type' => $section->question_type,
+                'question_type_master_id' => $section->question_type_master_id,
+                'type' => $section->questionType?->slug,
+                'question_type' => $section->questionType?->slug,
+                'question_type_name' => $section->questionType?->name,
                 'difficulty' => $section->difficulty,
-                'bloom_level' => $section->bloom_level,
                 'marks_per_question' => $section->marks_per_question,
                 'questions' => $questions,
             ];
 
-            $sections[$sectionName]['questions'] = array_merge(
-                $sections[$sectionName]['questions'],
-                $questions->toArray()
-            );
+            $sections[$sectionName]['questions'] = array_merge($sections[$sectionName]['questions'], $questions->toArray());
         }
 
-        return response()->json([
-            'sections' => array_values($sections)
-        ]);
+        return response()->json(['sections' => array_values($sections)]);
     }
 }

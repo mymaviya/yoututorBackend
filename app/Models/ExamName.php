@@ -17,4 +17,8 @@ class ExamName extends Model
         'is_active' => 'boolean',
     ];
 
+    public function blueprints()
+    {
+        return $this->hasMany(PaperBlueprint::class);
+    }
 }

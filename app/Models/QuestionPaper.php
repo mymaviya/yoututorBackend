@@ -7,17 +7,17 @@ use Illuminate\Database\Eloquent\Model;
 class QuestionPaper extends Model
 {
     protected $fillable = [
-        'title',
-        'exam_type',
-        'duration',
-        'instructions',
         'grade_id',
+        'stream_id',
         'subject_id',
+        'exam_name_id',
         'paper_blueprint_id',
-        'is_active',
+        'title',
+        'instructions',
         'total_marks',
-        'created_by',
+        'duration_minutes',
         'status',
+        'created_by',
         'finalized_at',
         'finalized_by',
         'printed_at',
@@ -26,14 +26,36 @@ class QuestionPaper extends Model
         'archived_by',
     ];
 
+    protected $casts = [
+        'total_marks' => 'decimal:2',
+        'finalized_at' => 'datetime',
+        'printed_at' => 'datetime',
+        'archived_at' => 'datetime',
+    ];
+
     public function grade()
     {
-        return $this->belongsTo(Grade::class, 'grade_id');
+        return $this->belongsTo(Grade::class);
+    }
+
+    public function stream()
+    {
+        return $this->belongsTo(Stream::class);
     }
 
     public function subject()
     {
         return $this->belongsTo(Subject::class);
+    }
+
+    public function examName()
+    {
+        return $this->belongsTo(ExamName::class);
+    }
+
+    public function blueprint()
+    {
+        return $this->belongsTo(PaperBlueprint::class, 'paper_blueprint_id');
     }
 
     public function questions()
@@ -43,31 +65,11 @@ class QuestionPaper extends Model
 
     public function items()
     {
-        return $this->hasMany(QuestionPaperItem::class);
+        return $this->hasMany(QuestionPaperItem::class)->orderBy('display_order');
     }
 
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
-    }
-
-    public function finalizedBy()
-    {
-        return $this->belongsTo(User::class, 'finalized_by');
-    }
-
-    public function printedBy()
-    {
-        return $this->belongsTo(User::class, 'printed_by');
-    }
-
-    public function archivedBy()
-    {
-        return $this->belongsTo(User::class, 'archived_by');
-    }
-
-    public function blueprint()
-    {
-        return $this->belongsTo(PaperBlueprint::class, 'paper_blueprint_id');
     }
 }

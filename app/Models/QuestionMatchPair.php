@@ -8,8 +8,8 @@ class QuestionMatchPair extends Model
 {
     protected $fillable = [
         'question_id',
-        'left_text',
-        'right_text',
+        'left_value',
+        'right_value',
         'sort_order',
     ];
 
@@ -17,6 +17,4 @@ class QuestionMatchPair extends Model
     {
         return $this->belongsTo(Question::class);
     }
-
-
 }

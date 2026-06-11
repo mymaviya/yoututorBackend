@@ -17,7 +17,7 @@ class QuestionApprovalController extends Controller
             'lesson',
             'options',
             'matchPairs',
-            'questionType',
+            'type',
             'languageItems',
             'creator',
             'approver'
@@ -36,7 +36,10 @@ class QuestionApprovalController extends Controller
         }
 
         if ($request->filled('type')) {
-            $query->where('type', $request->type);
+            $typeId = \App\Models\QuestionTypeMaster::where('slug', $request->type)->orWhere('name', $request->type)->value('id');
+            if ($typeId) {
+                $query->where('question_type_master_id', $typeId);
+            }
         }
 
         if ($request->filled('difficulty')) {

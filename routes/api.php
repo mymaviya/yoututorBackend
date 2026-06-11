@@ -36,8 +36,12 @@ use App\Http\Controllers\API\UserDeviceController;
 use App\Http\Controllers\API\UserSecurityController;
 use App\Http\Controllers\API\AuditLogController;
 use App\Http\Controllers\API\SidebarMenuController;
+use App\Http\Controllers\API\SubjectTemplateController;
+use App\Http\Controllers\API\QuestionTypeTemplateController;
+use App\Http\Controllers\API\BlueprintImportController;
 use App\Models\Permission;
 use App\Models\SidebarMenu;
+use App\Models\Stream;
 
 
 Route::post('/register', [AuthController::class, 'register']);
@@ -104,6 +108,12 @@ Route::middleware('auth:sanctum')->group(function () {
             'dashboard_route' => $dashboardRoute,
             'password_change_required' => (bool) $user->password_change_required,
         ]);
+    });
+
+    Route::get('/streams', function () {
+        return Stream::where('is_active', true)
+            ->orderBy('name')
+            ->get();
     });
 
     Route::post('/profile/update', [ProfileController::class, 'update']);
@@ -273,6 +283,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('question-papers/{id}/reopen', [QuestionPaperController::class, 'reopen']);
         Route::post('question-papers/{id}/printed', [QuestionPaperController::class, 'markPrinted']);
         Route::post('question-papers/{id}/archive', [QuestionPaperController::class, 'archive']);
+
+        Route::apiResource('subject-templates', SubjectTemplateController::class);
+        Route::post('subject-templates/{subjectTemplate}/apply', [SubjectTemplateController::class, 'apply']);
+
+        Route::get('question-type-template-masters', [QuestionTypeTemplateController::class, 'masters']);
+        Route::apiResource('question-type-templates', QuestionTypeTemplateController::class);
+        Route::post('question-type-templates/{questionTypeTemplate}/apply', [QuestionTypeTemplateController::class, 'apply']);
+
+        Route::post('/blueprint-import/question-type-template', [BlueprintImportController::class, 'importQuestionTypeTemplate']);
+        Route::post('/blueprint-import/paper-blueprint', [BlueprintImportController::class, 'importPaperBlueprint']);
+        Route::post('/blueprint-import/all', [BlueprintImportController::class, 'importAll']);
+        Route::get('/blueprint-import/template', [BlueprintImportController::class, 'downloadTemplate']);
+
+
     });
 
 

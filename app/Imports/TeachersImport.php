@@ -4,7 +4,6 @@ namespace App\Imports;
 
 use App\Models\Role;
 use App\Models\User;
-use App\Models\Teacher;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Hash;
 use Maatwebsite\Excel\Concerns\ToCollection;
@@ -21,18 +20,29 @@ class TeachersImport implements ToCollection
     {
         $teacherRole = Role::where('slug', 'teacher')->first();
 
-        foreach ($rows->skip(1) as $index => $row) {
-            $rowNumber = $index + 1;
+        if (!$teacherRole) {
+            $this->errors[] = "Teacher role not found. Please seed roles first.";
+            return;
+        }
 
-            $name = trim($row[0] ?? '');
-            $email = trim($row[1] ?? '');
-            $mobile = trim($row[2] ?? '');
-            $qualification = trim($row[3] ?? '');
-            $address = trim($row[4] ?? '');
+        foreach ($rows->skip(1) as $index => $row) {
+            $rowNumber = $index + 2;
+
+            $name = trim((string) ($row[0] ?? ''));
+            $email = strtolower(trim((string) ($row[1] ?? '')));
+            $mobile = trim((string) ($row[2] ?? ''));
+            // $qualification = trim((string) ($row[3] ?? '')); // V2 has no teachers table.
+            $address = trim((string) ($row[4] ?? ''));
 
             if (!$name || !$email || !$mobile) {
                 $this->skipped++;
                 $this->errors[] = "Row {$rowNumber}: Name, Email and Mobile are required.";
+                continue;
+            }
+
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $this->skipped++;
+                $this->errors[] = "Row {$rowNumber}: Invalid email address.";
                 continue;
             }
 
@@ -44,25 +54,18 @@ class TeachersImport implements ToCollection
 
             $passwordPlain = $this->generatePassword($name, $mobile);
 
-            $user = User::create([
+            User::create([
                 'name' => $name,
                 'email' => $email,
                 'contact' => $mobile,
-                'address' => $address,
+                'address' => $address ?: null,
                 'role' => 'teacher',
-                'role_id' => $teacherRole?->id,
+                'role_id' => $teacherRole->id,
                 'password' => Hash::make($passwordPlain),
                 'is_active' => true,
                 'login_enabled' => true,
                 'login_start_date' => now()->toDateString(),
                 'password_change_required' => true,
-                'password_changed_at' => null,
-            ]);
-
-            Teacher::create([
-                'user_id' => $user->id,
-                'qualification' => $qualification,
-                'is_active' => true,
             ]);
 
             $this->credentials[] = [
@@ -75,10 +78,10 @@ class TeachersImport implements ToCollection
         }
     }
 
-    private function generatePassword($name, $mobile): string
+    private function generatePassword(string $name, string $mobile): string
     {
-        $firstName = explode(' ', trim($name))[0];
-        $lastFour = substr(preg_replace('/\D/', '', $mobile), -4);
+        $firstName = explode(' ', trim($name))[0] ?: 'Teacher';
+        $lastFour = substr(preg_replace('/\D/', '', $mobile), -4) ?: '0000';
 
         return Str::ucfirst(Str::lower($firstName)) . $lastFour;
     }

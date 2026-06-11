@@ -9,17 +9,18 @@ class Role extends Model
     protected $fillable = [
         'name',
         'slug',
+        'is_active',
         'bypass_device_restriction',
+    ];
+
+    protected $casts = [
+        'is_active' => 'boolean',
+        'bypass_device_restriction' => 'boolean',
     ];
 
     public function permissions()
     {
-        return $this->belongsToMany(
-            Permission::class,
-            'role_permissions',
-            'role_id',
-            'permission_id'
-        );
+        return $this->belongsToMany(Permission::class, 'role_permissions');
     }
 
     public function users()

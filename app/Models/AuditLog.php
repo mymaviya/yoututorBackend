@@ -10,13 +10,12 @@ class AuditLog extends Model
         'user_id',
         'action',
         'module',
-        'description',
-        'ip_address',
-        'browser',
-        'platform',
-        'user_agent',
+        'auditable_type',
+        'auditable_id',
         'old_values',
         'new_values',
+        'ip_address',
+        'user_agent',
     ];
 
     protected $casts = [
@@ -27,5 +26,10 @@ class AuditLog extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function auditable()
+    {
+        return $this->morphTo();
     }
 }

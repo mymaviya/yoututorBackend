@@ -48,8 +48,7 @@ class QuestionPaperController extends Controller
         ]);
 
         if ($request->user()->role === 'teacher') {
-            $allowed = $request->user()->teacher
-                ->assignments()
+            $allowed = $request->user()->assignments()
                 ->where('grade_id', $request->grade_id)
                 ->where('subject_id', $request->subject_id)
                 ->exists();
@@ -59,6 +58,23 @@ class QuestionPaperController extends Controller
                     'message' => 'You are not assigned to this grade and subject.'
                 ], 403);
             }
+        }
+
+        $blueprintErrors = $this->validatePaperAgainstBlueprint(
+            $request->paper_blueprint_id,
+            $request->questions,
+            (bool) $request->moderate_difficulty_mode
+        );
+
+        if (!empty($blueprintErrors)) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'Paper does not follow the selected blueprint.',
+                'errors' => [
+                    'blueprint' => $blueprintErrors,
+                ],
+            ], 422);
         }
 
         $paper = QuestionPaper::create([
@@ -167,6 +183,23 @@ class QuestionPaperController extends Controller
                 ], 422);
             }
 
+            $blueprintErrors = $this->validatePaperAgainstBlueprint(
+                $request->paper_blueprint_id,
+                $request->questions,
+                (bool) $request->moderate_difficulty_mode
+            );
+
+            if (!empty($blueprintErrors)) {
+                DB::rollBack();
+
+                return response()->json([
+                    'message' => 'Paper does not follow the selected blueprint.',
+                    'errors' => [
+                        'blueprint' => $blueprintErrors,
+                    ],
+                ], 422);
+            }
+
             /* UPDATE PAPER */
 
             $paper->update([
@@ -178,7 +211,7 @@ class QuestionPaperController extends Controller
                 'grade_id' => $request->grade_id,
                 'subject_id' => $request->subject_id,
                 'paper_blueprint_id' => $request->paper_blueprint_id,
-                'total_marks' => collect($request->questions)->sum(fn ($q) => (float) ($q['marks'] ?? 0)),
+                'total_marks' => collect($request->questions)->sum(fn($q) => (float) ($q['marks'] ?? 0)),
                 'created_by' => auth()->id(),
             ]);
 
@@ -389,5 +422,93 @@ class QuestionPaperController extends Controller
         return response()->json([
             'message' => 'Paper archived successfully.'
         ]);
+    }
+
+    private function validatePaperAgainstBlueprint($paperBlueprintId, array $questions, bool $moderateDifficultyMode = false): array
+    {
+        $blueprint = \App\Models\PaperBlueprint::with([
+            'sections.questionTypeMaster',
+            'sections.bloomLevels',
+        ])->findOrFail($paperBlueprintId);
+
+        $errors = [];
+
+        $paperQuestions = collect($questions);
+
+        foreach ($blueprint->sections as $section) {
+            $requiredCount = (int) $section->question_count;
+            $requiredMarks = (float) $section->marks_per_question;
+            $requiredTypeId = (int) $section->question_type_master_id;
+            $requiredDifficulty = $section->difficulty;
+
+            $matchingQuestions = $paperQuestions->filter(function ($item) use (
+                $section,
+                $requiredTypeId,
+                $requiredDifficulty,
+                $moderateDifficultyMode
+            ) {
+                $question = \App\Models\Question::find($item['question_id'] ?? null);
+
+                if (!$question) {
+                    return false;
+                }
+
+                if (($item['section'] ?? null) !== $section->section_name) {
+                    return false;
+                }
+
+                if ((int) $question->question_type_master_id !== $requiredTypeId) {
+                    return false;
+                }
+
+                if (
+                    !$moderateDifficultyMode &&
+                    $requiredDifficulty &&
+                    $question->difficulty !== $requiredDifficulty
+                ) {
+                    return false;
+                }
+
+                return true;
+            });
+
+            if ($matchingQuestions->count() !== $requiredCount) {
+                $errors[] = "{$section->section_name}: {$section->questionTypeMaster->name} requires {$requiredCount} question(s), but {$matchingQuestions->count()} given.";
+            }
+
+            foreach ($matchingQuestions as $item) {
+                if ((float) ($item['marks'] ?? 0) !== $requiredMarks) {
+                    $errors[] = "{$section->section_name}: marks must be {$requiredMarks} for {$section->questionTypeMaster->name}.";
+                }
+            }
+
+            if ($section->bloomLevels && $section->bloomLevels->count()) {
+                foreach ($section->bloomLevels as $bloomRule) {
+                    $bloomCount = $matchingQuestions->filter(function ($item) use ($bloomRule) {
+                        $question = \App\Models\Question::find($item['question_id'] ?? null);
+
+                        return $question && $question->bloom_level === $bloomRule->bloom_level;
+                    })->count();
+
+                    if ($bloomCount !== (int) $bloomRule->question_count) {
+                        $errors[] = "{$section->section_name}: Bloom level {$bloomRule->bloom_level} requires {$bloomRule->question_count} question(s), but {$bloomCount} given.";
+                    }
+                }
+            }
+        }
+
+        $expectedTotal = (float) $blueprint->sections->sum(function ($section) {
+            return (int) $section->question_count * (float) $section->marks_per_question;
+        });
+
+        $actualTotal = (float) $paperQuestions->sum(function ($item) {
+            return (float) ($item['marks'] ?? 0);
+        });
+
+        if ($expectedTotal !== $actualTotal) {
+            $errors[] = "Total marks mismatch. Blueprint requires {$expectedTotal}, but paper has {$actualTotal}.";
+        }
+
+        return $errors;
     }
 }

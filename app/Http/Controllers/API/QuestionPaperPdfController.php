@@ -18,7 +18,8 @@ class QuestionPaperPdfController extends Controller
             'questions' => function ($q) {
                 $q->with([
                     'question.options',
-                    'question.matchPairs'
+                    'question.matchPairs',
+                    'question.type'
                 ])
                     ->orderBy('section')
                     ->orderBy('sort_order');
@@ -26,10 +27,10 @@ class QuestionPaperPdfController extends Controller
         ])->findOrFail($id);
 
         foreach ($paper->questions as $paperQuestion) {
-            $questionType = $paperQuestion->question?->type;
+            $questionTypeId = $paperQuestion->question?->question_type_master_id;
 
             $blueprintRow = PaperBlueprintSection::where('section_name', $paperQuestion->section)
-                ->where('question_type', $questionType)
+                ->where('question_type_master_id', $questionTypeId)
                 ->where('marks_per_question', '>', 0)
                 ->first();
 

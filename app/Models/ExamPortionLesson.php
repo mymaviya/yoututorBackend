@@ -10,8 +10,8 @@ class ExamPortionLesson extends Model
         'exam_portion_id',
         'lesson_id',
         'topics',
-        'learning_objectives',
-        'remarks'
+        'objectives',
+        'remarks',
     ];
 
     public function portion()

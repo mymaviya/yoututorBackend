@@ -7,47 +7,41 @@ use Illuminate\Database\Eloquent\Model;
 class Question extends Model
 {
     protected $fillable = [
-
         'grade_id',
+        'stream_id',
         'subject_id',
         'lesson_id',
-
+        'question_type_master_id',
         'question',
-        'question_image',
-
-        'type',
         'difficulty',
         'bloom_level',
-
         'marks',
-        'matches',
-
         'answer',
         'explanation',
-
         'is_active',
         'is_featured',
-
         'created_by',
         'status',
         'approved_by',
         'approved_at',
-        'rejection_reason'
+        'rejection_reason',
     ];
 
     protected $casts = [
-        'matches' => 'array',
+        'marks' => 'decimal:2',
+        'is_active' => 'boolean',
+        'is_featured' => 'boolean',
+        'approved_at' => 'datetime',
     ];
-
-    /*
-    |--------------------------------------------------------------------------
-    | Relations
-    |--------------------------------------------------------------------------
-    */
 
     public function grade()
     {
         return $this->belongsTo(Grade::class);
+    }
+
+    public function stream()
+    {
+        return $this->belongsTo(Stream::class);
     }
 
     public function subject()
@@ -60,14 +54,24 @@ class Question extends Model
         return $this->belongsTo(Lesson::class);
     }
 
+    public function type()
+    {
+        return $this->belongsTo(QuestionTypeMaster::class, 'question_type_master_id');
+    }
+
     public function options()
     {
-        return $this->hasMany(QuestionOption::class);
+        return $this->hasMany(QuestionOption::class)->orderBy('sort_order');
     }
 
     public function images()
     {
         return $this->hasMany(QuestionImage::class);
+    }
+
+    public function matchPairs()
+    {
+        return $this->hasMany(QuestionMatchPair::class)->orderBy('sort_order');
     }
 
     public function creator()
@@ -80,25 +84,8 @@ class Question extends Model
         return $this->belongsTo(User::class, 'approved_by');
     }
 
-    public function matchPairs()
-    {
-        return $this->hasMany(QuestionMatchPair::class)->orderBy('sort_order');
-    }
-
-    public function questionType()
-    {
-        return $this->belongsTo(QuestionType::class, 'type', 'slug');
-    }
-
     public function languageItems()
     {
         return $this->hasMany(LanguageQuestion::class);
-    }
-
-    protected $appends = ['type_name'];
-
-    public function getTypeNameAttribute()
-    {
-        return $this->questionType?->name ?? $this->type;
     }
 }

@@ -12,7 +12,7 @@ class ExamPortionController extends Controller
     public function index(Request $request)
     {
         $query = ExamPortion::with([
-            'teacher.user',
+            'teacher',
             'grade',
             'subject',
             'examName',
@@ -43,7 +43,7 @@ class ExamPortionController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
-            'teacher_id' => 'required|exists:teachers,id',
+            'teacher_id' => 'required|exists:users,id',
             'grade_id' => 'required|exists:grades,id',
             'subject_id' => 'required|exists:subjects,id',
             'exam_name_ids' => 'required|array|min:1',
@@ -88,10 +88,10 @@ class ExamPortionController extends Controller
                 'assigned_by' => auth()->id(),
             ]);
 
-            $portion->load(['teacher.user', 'grade', 'subject', 'examName']);
+            $portion->load(['teacher', 'grade', 'subject', 'examName']);
 
             notifyUser(
-                $portion->teacher->user_id,
+                $portion->teacher_id,
                 'Exam Portion Assigned',
                 'You have been assigned to prepare syllabus for ' . $portion->examName->name,
                 'exam_portion',
@@ -110,7 +110,7 @@ class ExamPortionController extends Controller
     public function show($id)
     {
         $portion = ExamPortion::with([
-            'teacher.user',
+            'teacher',
             'grade',
             'subject',
             'examName',
@@ -127,7 +127,7 @@ class ExamPortionController extends Controller
         $portion = ExamPortion::findOrFail($id);
 
         $data = $request->validate([
-            'teacher_id' => 'required|exists:teachers,id',
+            'teacher_id' => 'required|exists:users,id',
             'grade_id' => 'required|exists:grades,id',
             'subject_id' => 'required|exists:subjects,id',
             'exam_name_ids' => 'required|array|min:1',
@@ -157,7 +157,7 @@ class ExamPortionController extends Controller
 
         return response()->json([
             'message' => 'Exam portion updated successfully',
-            'data' => $portion->load(['teacher.user', 'grade', 'subject', 'examName']),
+            'data' => $portion->load(['teacher', 'grade', 'subject', 'examName']),
         ]);
     }
 
@@ -172,7 +172,7 @@ class ExamPortionController extends Controller
 
     public function myPortions()
     {
-        $teacher = auth()->user()->teacher;
+        $teacher = auth()->user();
 
         if (!$teacher) {
             return response()->json([
@@ -195,7 +195,7 @@ class ExamPortionController extends Controller
 
     public function submit(Request $request, ExamPortion $examPortion)
     {
-        $teacher = auth()->user()->teacher;
+        $teacher = auth()->user();
 
         if (
             auth()->user()->role === 'teacher' &&
@@ -257,13 +257,13 @@ class ExamPortionController extends Controller
             'rejection_reason' => null,
         ]);
 
-        $examPortion->load(['examName', 'grade', 'subject', 'teacher.user']);
+        $examPortion->load(['examName', 'grade', 'subject', 'teacher']);
 
         if ($examPortion->assigned_by) {
             notifyUser(
                 $examPortion->assigned_by,
                 'Exam Syllabus Submitted',
-                $examPortion->teacher->user->name . ' has submitted syllabus for ' .
+                $examPortion->teacher?->name . ' has submitted syllabus for ' .
                     $examPortion->examName->name . ' - ' .
                     $examPortion->grade->name . ' - ' .
                     $examPortion->subject->name,
@@ -288,7 +288,7 @@ class ExamPortionController extends Controller
         ]);
 
         notifyUser(
-            $examPortion->teacher->user_id,
+            $examPortion->teacher_id,
             'Syllabus Approved',
             'Your exam-wise syllabus has been approved.',
             'exam_portion_approved',
@@ -297,7 +297,7 @@ class ExamPortionController extends Controller
 
         return response()->json([
             'message' => 'Syllabus approved successfully',
-            'data' => $examPortion->load(['teacher.user', 'grade', 'subject', 'lessons.lesson']),
+            'data' => $examPortion->load(['teacher', 'grade', 'subject', 'lessons.lesson']),
         ]);
     }
 
@@ -315,7 +315,7 @@ class ExamPortionController extends Controller
         ]);
 
         notifyUser(
-            $examPortion->teacher->user_id,
+            $examPortion->teacher_id,
             'Syllabus Rejected',
             $data['rejection_reason'],
             'exam_portion_rejected',
@@ -324,7 +324,7 @@ class ExamPortionController extends Controller
 
         return response()->json([
             'message' => 'Syllabus rejected successfully',
-            'data' => $examPortion->load(['teacher.user', 'grade', 'subject', 'lessons.lesson']),
+            'data' => $examPortion->load(['teacher', 'grade', 'subject', 'lessons.lesson']),
         ]);
     }
 }

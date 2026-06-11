@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\PaperBlueprint;
 use App\Models\Question;
+use App\Models\QuestionTypeMaster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -12,86 +13,38 @@ class PaperBlueprintController extends Controller
 {
     private function relationships(): array
     {
-        return [
-            'grade',
-            'subject',
-            'examName',
-            'sections',
-            'bloomLevels',
-        ];
+        return ['grade', 'stream', 'subject', 'examName', 'sections.questionType'];
     }
 
-    private function validationRules(): array
+    private function resolveQuestionTypeId($value): ?int
     {
-        return [
-            'grade_id' => 'required|exists:grades,id',
-            'subject_id' => 'required|exists:subjects,id',
-            'exam_name_id' => 'nullable|exists:exam_names,id',
-            'title' => 'required|string|max:255',
-            'is_active' => 'boolean',
-
-            'sections' => 'required|array|min:1',
-            'sections.*.section_name' => 'required|string|max:255',
-            'sections.*.instructions' => 'nullable|string',
-            'sections.*.items' => 'required|array|min:1',
-            'sections.*.items.*.question_type' => 'required|string|max:255',
-            'sections.*.items.*.difficulty' => 'nullable|string|max:255',
-            'sections.*.items.*.bloom_level' => 'nullable|string|max:255',
-            'sections.*.items.*.question_count' => 'required|integer|min:1',
-            'sections.*.items.*.marks_per_question' => 'required|numeric|min:0.5',
-            'bloom_levels' => 'nullable|array',
-            'bloom_levels.*.bloom_level' => 'required|string',
-            'bloom_levels.*.percentage' => 'required|numeric|min:0|max:100',
-        ];
+        if (is_numeric($value)) return (int) $value;
+        return QuestionTypeMaster::where('slug', $value)->orWhere('name', $value)->value('id');
     }
 
-    private function flattenSections(array $sections): array
-    {
-        $rows = [];
-
-        foreach ($sections as $sectionIndex => $section) {
-            foreach ($section['items'] as $itemIndex => $item) {
-                $rows[] = [
-                    'section_name' => $section['section_name'],
-                    'instructions' => $section['instructions'] ?? null,
-                    'question_type' => $item['question_type'],
-                    'difficulty' => $item['difficulty'] ?? null,
-                    'bloom_level' => $item['bloom_level'] ?? null,
-                    'question_count' => $item['question_count'],
-                    'marks_per_question' => $item['marks_per_question'],
-                    'sort_order' => (($sectionIndex + 1) * 100) + $itemIndex,
-                ];
-            }
-        }
-
-        return $rows;
-    }
-
-    private function formatBlueprint(PaperBlueprint $blueprint): PaperBlueprint
+    private function formatBlueprint(PaperBlueprint $blueprint)
     {
         $blueprint->setRelation(
             'sections',
             $blueprint->sections
-                ->groupBy(function ($row) {
-                    $sortOrder = (int) $row->sort_order;
-
-                    return $sortOrder >= 100 ? intdiv($sortOrder, 100) : $sortOrder;
-                })
+                ->groupBy('section_name')
                 ->values()
                 ->map(function ($rows) {
                     $first = $rows->first();
-
                     return [
                         'id' => $first->id,
                         'section_name' => $first->section_name,
                         'instructions' => $first->instructions,
-                        'items' => $rows->values()->map(fn($row) => [
+                        'items' => $rows->values()->map(fn ($row) => [
                             'id' => $row->id,
-                            'question_type' => $row->question_type,
+                            'question_type_master_id' => $row->question_type_master_id,
+                            'question_type' => $row->questionType?->slug,
+                            'question_type_name' => $row->questionType?->name,
                             'difficulty' => $row->difficulty,
-                            'bloom_level' => $row->bloom_level,
+                            'bloom_level' => null,
                             'question_count' => $row->question_count,
                             'marks_per_question' => $row->marks_per_question,
+                            'available_questions' => $row->available_questions ?? 0,
                         ]),
                     ];
                 })
@@ -104,336 +57,159 @@ class PaperBlueprintController extends Controller
     {
         $query = PaperBlueprint::with($this->relationships())->latest();
 
-        if ($request->filled('grade_id')) {
-            $query->where('grade_id', $request->grade_id);
-        }
+        if ($request->filled('grade_id')) $query->where('grade_id', $request->grade_id);
+        if ($request->filled('stream_id')) $query->where('stream_id', $request->stream_id);
+        if ($request->filled('subject_id')) $query->where('subject_id', $request->subject_id);
+        if ($request->filled('exam_name_id')) $query->where('exam_name_id', $request->exam_name_id);
+        if ($request->filled('is_active')) $query->where('is_active', $request->boolean('is_active'));
 
-        if ($request->filled('subject_id')) {
-            $query->where('subject_id', $request->subject_id);
-        }
-
-        if ($request->filled('exam_name_id')) {
-            $query->where('exam_name_id', $request->exam_name_id);
-        }
-
-        if ($request->filled('is_active')) {
-            $query->where('is_active', $request->boolean('is_active'));
-        }
-
-
-        $blueprints = $query->paginate(20);
-
-        $blueprints->getCollection()->transform(
-            fn(PaperBlueprint $blueprint) => $this->formatBlueprint($blueprint)
-        );
-
-        return response()->json($blueprints);
+        return response()->json($query->get()->map(fn ($bp) => $this->formatBlueprint($bp)));
     }
 
     public function store(Request $request)
     {
-        $data = $request->validate($this->validationRules());
-
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'grade_id' => 'required|exists:grades,id',
+            'stream_id' => 'nullable|exists:streams,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'exam_name_id' => 'nullable|exists:exam_names,id',
+            'duration_minutes' => 'nullable|integer',
+            'duration' => 'nullable|integer',
+            'total_marks' => 'required|numeric',
+            'is_active' => 'boolean',
+            'sections' => 'required|array|min:1',
+            'sections.*.section_name' => 'required|string|max:255',
+            'sections.*.instructions' => 'nullable|string',
+            'sections.*.items' => 'required|array|min:1',
+            'sections.*.items.*.question_type' => 'required_without:sections.*.items.*.question_type_master_id',
+            'sections.*.items.*.question_type_master_id' => 'nullable|exists:question_type_masters,id',
+            'sections.*.items.*.difficulty' => 'nullable|string|max:255',
+            'sections.*.items.*.question_count' => 'required|integer|min:1',
+            'sections.*.items.*.marks_per_question' => 'required|numeric|min:0',
+        ]);
 
         return DB::transaction(function () use ($data) {
-            $sections = $this->flattenSections($data['sections']);
-            $totalQuestions = collect($sections)->sum('question_count');
-
-            $totalMarks = collect($sections)->sum(function ($section) {
-                return $section['question_count'] * $section['marks_per_question'];
-            });
-
             $blueprint = PaperBlueprint::create([
+                'name' => $data['name'],
                 'grade_id' => $data['grade_id'],
+                'stream_id' => $data['stream_id'] ?? null,
                 'subject_id' => $data['subject_id'],
                 'exam_name_id' => $data['exam_name_id'] ?? null,
-                'title' => $data['title'],
-                'difficulty' => $data['difficulty'] ?? null,
-                'bloom_level' => $data['bloom_level'] ?? null,
-                'total_questions' => $totalQuestions,
-                'total_marks' => $totalMarks,
+                'duration_minutes' => $data['duration_minutes'] ?? $data['duration'] ?? null,
+                'total_marks' => $data['total_marks'],
                 'is_active' => $data['is_active'] ?? true,
             ]);
 
-            $blueprint->bloomLevels()->delete();
+            foreach ($data['sections'] as $sectionIndex => $section) {
+                foreach ($section['items'] as $itemIndex => $item) {
+                    $questionTypeId = $item['question_type_master_id'] ?? $this->resolveQuestionTypeId($item['question_type'] ?? null);
 
-            foreach ($data['bloom_levels'] ?? [] as $item) {
-                $blueprint->bloomLevels()->create([
-                    'bloom_level' => $item['bloom_level'],
-                    'percentage' => $item['percentage'],
-                ]);
+                    if (!$questionTypeId) continue;
+
+                    $blueprint->sections()->create([
+                        'section_name' => $section['section_name'],
+                        'instructions' => $section['instructions'] ?? null,
+                        'question_type_master_id' => $questionTypeId,
+                        'difficulty' => $item['difficulty'] ?? null,
+                        'question_count' => $item['question_count'],
+                        'marks_per_question' => $item['marks_per_question'],
+                        'sort_order' => (($sectionIndex + 1) * 100) + ($itemIndex + 1),
+                    ]);
+                }
             }
-
-            foreach ($sections as $section) {
-                $blueprint->sections()->create($section);
-            }
-
-            $blueprint->load($this->relationships());
 
             return response()->json([
                 'message' => 'Paper blueprint created successfully',
-                'data' => $this->formatBlueprint($blueprint),
+                'data' => $this->formatBlueprint($blueprint->load($this->relationships())),
             ], 201);
         });
     }
 
     public function show($id)
     {
-        $blueprint = PaperBlueprint::with([
-            'grade',
-            'subject',
-            'examName',
-            'sections' => function ($q) {
-                $q->orderBy('sort_order');
-            },
-        ])->findOrFail($id);
-
-        $blueprint = $this->attachAvailability($blueprint);
-
-        return response()->json($blueprint);
+        return response()->json($this->formatBlueprint(PaperBlueprint::with($this->relationships())->findOrFail($id)));
     }
-
 
     public function update(Request $request, $id)
     {
         $blueprint = PaperBlueprint::findOrFail($id);
-
-        $data = $request->validate($this->validationRules());
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'grade_id' => 'required|exists:grades,id',
+            'stream_id' => 'nullable|exists:streams,id',
+            'subject_id' => 'required|exists:subjects,id',
+            'exam_name_id' => 'nullable|exists:exam_names,id',
+            'duration_minutes' => 'nullable|integer',
+            'duration' => 'nullable|integer',
+            'total_marks' => 'required|numeric',
+            'is_active' => 'boolean',
+            'sections' => 'required|array|min:1',
+        ]);
 
         return DB::transaction(function () use ($blueprint, $data) {
-            $sections = $this->flattenSections($data['sections']);
-            $totalQuestions = collect($sections)->sum('question_count');
-
-            $totalMarks = collect($sections)->sum(function ($section) {
-                return $section['question_count'] * $section['marks_per_question'];
-            });
-
             $blueprint->update([
+                'name' => $data['name'],
                 'grade_id' => $data['grade_id'],
+                'stream_id' => $data['stream_id'] ?? null,
                 'subject_id' => $data['subject_id'],
                 'exam_name_id' => $data['exam_name_id'] ?? null,
-                'title' => $data['title'],
-                'difficulty' => $data['difficulty'] ?? null,
-                'bloom_level' => $data['bloom_level'] ?? null,
-                'total_questions' => $totalQuestions,
-                'total_marks' => $totalMarks,
+                'duration_minutes' => $data['duration_minutes'] ?? $data['duration'] ?? null,
+                'total_marks' => $data['total_marks'],
                 'is_active' => $data['is_active'] ?? true,
             ]);
 
             $blueprint->sections()->delete();
 
-            $blueprint->bloomLevels()->delete();
-
-            foreach ($data['bloom_levels'] ?? [] as $item) {
-                $blueprint->bloomLevels()->create([
-                    'bloom_level' => $item['bloom_level'],
-                    'percentage' => $item['percentage'],
-                ]);
+            foreach ($data['sections'] as $sectionIndex => $section) {
+                foreach (($section['items'] ?? []) as $itemIndex => $item) {
+                    $questionTypeId = $item['question_type_master_id'] ?? $this->resolveQuestionTypeId($item['question_type'] ?? null);
+                    if (!$questionTypeId) continue;
+                    $blueprint->sections()->create([
+                        'section_name' => $section['section_name'],
+                        'instructions' => $section['instructions'] ?? null,
+                        'question_type_master_id' => $questionTypeId,
+                        'difficulty' => $item['difficulty'] ?? null,
+                        'question_count' => $item['question_count'],
+                        'marks_per_question' => $item['marks_per_question'],
+                        'sort_order' => (($sectionIndex + 1) * 100) + ($itemIndex + 1),
+                    ]);
+                }
             }
-
-            foreach ($sections as $section) {
-                $blueprint->sections()->create($section);
-            }
-
-            $blueprint->load($this->relationships());
 
             return response()->json([
                 'message' => 'Paper blueprint updated successfully',
-                'data' => $this->formatBlueprint($blueprint),
+                'data' => $this->formatBlueprint($blueprint->fresh()->load($this->relationships())),
             ]);
-        });
-    }
-
-    public function copy(Request $request, $id)
-    {
-        $data = $request->validate([
-            'grade_id' => 'required|exists:grades,id',
-            'subject_id' => 'required|exists:subjects,id',
-            'exam_name_id' => 'nullable|exists:exam_names,id',
-            'title' => 'required|string|max:255',
-        ]);
-
-        $source = PaperBlueprint::with([
-            'sections',
-            'bloomLevels',
-        ])->findOrFail($id);
-
-        $exists = PaperBlueprint::where('grade_id', $data['grade_id'])
-            ->where('subject_id', $data['subject_id'])
-            ->where('exam_name_id', $data['exam_name_id'] ?? null)
-            ->exists();
-
-        if ($exists) {
-            return response()->json([
-                'message' => 'A blueprint with same grade, subject, exam and title already exists.',
-                'errors' => [
-                    'title' => ['Duplicate blueprint found.']
-                ]
-            ], 422);
-        }
-
-        return DB::transaction(function () use ($source, $data) {
-            $newBlueprint = PaperBlueprint::create([
-                'grade_id' => $data['grade_id'],
-                'subject_id' => $data['subject_id'],
-                'exam_name_id' => $data['exam_name_id'] ?? null,
-                'title' => $data['title'],
-                'difficulty' => $source->difficulty,
-                'bloom_level' => $source->bloom_level,
-                'total_questions' => $source->total_questions,
-                'total_marks' => $source->total_marks,
-                'is_active' => true,
-            ]);
-
-            foreach ($source->sections as $section) {
-                $newBlueprint->sections()->create([
-                    'section_name' => $section->section_name,
-                    'instructions' => $section->instructions,
-                    'question_type' => $section->question_type,
-                    'difficulty' => $section->difficulty,
-                    'bloom_level' => $section->bloom_level,
-                    'question_count' => $section->question_count,
-                    'marks_per_question' => $section->marks_per_question,
-                    'sort_order' => $section->sort_order,
-                ]);
-            }
-
-            foreach ($source->bloomLevels as $level) {
-                $newBlueprint->bloomLevels()->create([
-                    'bloom_level' => $level->bloom_level,
-                    'percentage' => $level->percentage,
-                ]);
-            }
-
-            return response()->json([
-                'message' => 'Blueprint copied successfully',
-                'data' => $this->formatBlueprint(
-                    $newBlueprint->load($this->relationships())
-                ),
-            ], 201);
         });
     }
 
     public function destroy($id)
     {
         PaperBlueprint::findOrFail($id)->delete();
-
-        return response()->json([
-            'message' => 'Paper blueprint deleted successfully',
-        ]);
+        return response()->json(['message' => 'Paper blueprint deleted successfully']);
     }
 
     public function status($id)
     {
         $blueprint = PaperBlueprint::findOrFail($id);
-
-        $blueprint->update([
-            'is_active' => !$blueprint->is_active,
-        ]);
-
-        return response()->json([
-            'message' => 'Blueprint status updated successfully',
-            'data' => $blueprint,
-        ]);
+        $blueprint->update(['is_active' => !$blueprint->is_active]);
+        return response()->json(['message' => 'Blueprint status updated successfully', 'data' => $blueprint]);
     }
 
     public function dropdown(Request $request)
     {
-        $query = PaperBlueprint::with([
-            'grade',
-            'subject',
-            'examName',
-            'sections'
-        ])
-            ->where('is_active', true);
-
-        if ($request->filled('grade_id')) {
-            $query->where('grade_id', $request->grade_id);
-        }
-
-        if ($request->filled('subject_id')) {
-            $query->where('subject_id', $request->subject_id);
-        }
-
-        if ($request->filled('exam_name_id')) {
-            $query->where('exam_name_id', $request->exam_name_id);
-        }
-
-        $blueprints = $query->latest()->get();
-
-        $blueprints->transform(function ($blueprint) {
-            return $this->attachAvailability($blueprint);
-        });
-
-        return response()->json($blueprints);
+        return $this->index($request);
     }
 
-
-    private function availableQuestionCount($blueprint, $section)
+    private function availableQuestionCount($blueprint, $section): int
     {
         return Question::where('status', 'approved')
             ->where('grade_id', $blueprint->grade_id)
             ->where('subject_id', $blueprint->subject_id)
-            ->where('type', $section->question_type)
-            ->when(!empty($section->difficulty), function ($q) use ($section) {
-                $q->where('difficulty', $section->difficulty);
-            })
-            ->when(!empty($section->bloom_level), function ($q) use ($section) {
-                $q->where('bloom_level', $section->bloom_level);
-            })
+            ->where('question_type_master_id', $section->question_type_master_id)
+            ->when($blueprint->stream_id, fn ($q) => $q->where('stream_id', $blueprint->stream_id))
+            ->when($section->difficulty, fn ($q) => $q->where('difficulty', $section->difficulty))
             ->count();
-    }
-
-    private function attachAvailability(PaperBlueprint $blueprint): PaperBlueprint
-    {
-        $blueprint->sections->transform(function ($section) use ($blueprint) {
-            $section->available_questions = $this->availableQuestionCount(
-                $blueprint,
-                $section
-            );
-
-            return $section;
-        });
-
-        $blueprint->available_questions_total = $blueprint->sections
-            ->sum('available_questions');
-
-        return $this->formatBlueprintWithAvailability($blueprint);
-    }
-
-    private function formatBlueprintWithAvailability(PaperBlueprint $blueprint): PaperBlueprint
-    {
-        $blueprint->setRelation(
-            'sections',
-            $blueprint->sections
-                ->groupBy(function ($row) {
-                    $sortOrder = (int) $row->sort_order;
-
-                    return $sortOrder >= 100
-                        ? intdiv($sortOrder, 100)
-                        : $sortOrder;
-                })
-                ->values()
-                ->map(function ($rows) {
-                    $first = $rows->first();
-
-                    return [
-                        'id' => $first->id,
-                        'section_name' => $first->section_name,
-                        'instructions' => $first->instructions,
-                        'items' => $rows->values()->map(fn($row) => [
-                            'id' => $row->id,
-                            'question_type' => $row->question_type,
-                            'difficulty' => $row->difficulty,
-                            'bloom_level' => $row->bloom_level,
-                            'question_count' => $row->question_count,
-                            'marks_per_question' => $row->marks_per_question,
-                            'available_questions' => $row->available_questions ?? 0,
-                        ]),
-                    ];
-                })
-        );
-
-        return $blueprint;
     }
 }

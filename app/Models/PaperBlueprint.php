@@ -8,21 +8,28 @@ class PaperBlueprint extends Model
 {
     protected $fillable = [
         'grade_id',
+        'stream_id',
         'subject_id',
         'exam_name_id',
-        'title',
+        'name',
+        'duration_minutes',
         'total_marks',
-        'total_questions',
         'is_active',
     ];
 
     protected $casts = [
+        'total_marks' => 'decimal:2',
         'is_active' => 'boolean',
     ];
 
     public function grade()
     {
         return $this->belongsTo(Grade::class);
+    }
+
+    public function stream()
+    {
+        return $this->belongsTo(Stream::class);
     }
 
     public function subject()
@@ -38,10 +45,5 @@ class PaperBlueprint extends Model
     public function sections()
     {
         return $this->hasMany(PaperBlueprintSection::class)->orderBy('sort_order');
-    }
-
-    public function bloomLevels()
-    {
-        return $this->hasMany(PaperBlueprintBloomLevel::class,'paper_blueprint_id');
     }
 }
