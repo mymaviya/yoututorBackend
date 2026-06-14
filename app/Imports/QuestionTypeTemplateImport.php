@@ -22,7 +22,7 @@ class QuestionTypeTemplateImport implements ToCollection
 
     public function collection(Collection $rows)
     {
-        // This class will be called sheet-wise from controller.
+        // This class is called manually sheet-wise from import().
     }
 
     public function import(string $filePath): array
@@ -47,8 +47,8 @@ class QuestionTypeTemplateImport implements ToCollection
         foreach (array_slice($rows, 1) as $index => $row) {
             $rowNumber = $index + 2;
 
-            $name = trim($row[0] ?? '');
-            $slug = trim($row[1] ?? '');
+            $name = trim((string) ($row[0] ?? ''));
+            $slug = trim((string) ($row[1] ?? ''));
 
             if (!$name) {
                 $this->skipped++;
@@ -75,9 +75,9 @@ class QuestionTypeTemplateImport implements ToCollection
         foreach (array_slice($rows, 1) as $index => $row) {
             $rowNumber = $index + 2;
 
-            $templateName = trim($row[0] ?? '');
-            $category = trim($row[1] ?? '');
-            $questionTypeSlug = trim($row[2] ?? '');
+            $templateName = trim((string) ($row[0] ?? ''));
+            $category = trim((string) ($row[1] ?? ''));
+            $questionTypeSlug = trim((string) ($row[2] ?? ''));
 
             if (!$templateName || !$questionTypeSlug) {
                 $this->skipped++;
@@ -123,10 +123,10 @@ class QuestionTypeTemplateImport implements ToCollection
         foreach (array_slice($rows, 1) as $index => $row) {
             $rowNumber = $index + 2;
 
-            $templateName = trim($row[0] ?? '');
-            $gradeName = trim($row[1] ?? '');
-            $streamName = trim($row[2] ?? '');
-            $subjectName = trim($row[3] ?? '');
+            $templateName = trim((string) ($row[0] ?? ''));
+            $gradeName = trim((string) ($row[1] ?? ''));
+            $streamName = trim((string) ($row[2] ?? ''));
+            $subjectName = trim((string) ($row[3] ?? ''));
 
             if (!$templateName || !$gradeName || !$subjectName) {
                 $this->skipped++;
@@ -155,7 +155,7 @@ class QuestionTypeTemplateImport implements ToCollection
 
             $streamId = null;
 
-            if ($streamName) {
+            if ($streamName !== '') {
                 $stream = Stream::whereRaw('LOWER(name) = ?', [strtolower($streamName)])
                     ->first();
 
@@ -168,11 +168,19 @@ class QuestionTypeTemplateImport implements ToCollection
                 $streamId = $stream->id;
             }
 
-            $subject = $this->findOrCreateSubject(
-                $grade->id,
-                $streamId,
-                $subjectName
+            $subject = $this->findSubject(
+                gradeId: $grade->id,
+                streamId: $streamId,
+                subjectName: $subjectName
             );
+
+            if (!$subject) {
+                $streamText = $streamName !== '' ? " ({$streamName})" : '';
+
+                $this->skipped++;
+                $this->errors[] = "Question Type Assignments Row {$rowNumber}: Subject not found - {$subjectName}{$streamText}. Apply Subject Template first.";
+                continue;
+            }
 
             foreach ($template->items as $item) {
                 $exists = QuestionTypeAssignment::where('grade_id', $grade->id)
@@ -199,28 +207,23 @@ class QuestionTypeTemplateImport implements ToCollection
         }
     }
 
-    private function findOrCreateSubject($gradeId, $streamId, $subjectName)
+    private function findSubject(int $gradeId, ?int $streamId, string $subjectName): ?Subject
     {
         $normalized = strtolower(trim($subjectName));
 
-        $subject = Subject::where('grade_id', $gradeId)
-            ->where('stream_id', $streamId)
+        return Subject::where('grade_id', $gradeId)
+            ->where(function ($q) use ($streamId) {
+                $q->whereNull('stream_id');
+
+                if ($streamId) {
+                    $q->orWhere('stream_id', $streamId);
+                }
+            })
             ->where(function ($q) use ($normalized) {
                 $q->whereRaw('LOWER(name) = ?', [$normalized])
                     ->orWhereRaw('LOWER(name) LIKE ?', ["%{$normalized}%"])
                     ->orWhereRaw('? LIKE CONCAT("%", LOWER(name), "%")', [$normalized]);
             })
             ->first();
-
-        if ($subject) {
-            return $subject;
-        }
-
-        return Subject::create([
-            'grade_id' => $gradeId,
-            'stream_id' => $streamId,
-            'name' => trim($subjectName),
-            'is_active' => true,
-        ]);
     }
 }

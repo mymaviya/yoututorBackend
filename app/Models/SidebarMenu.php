@@ -11,11 +11,15 @@ class SidebarMenu extends Model
         'title',
         'icon',
         'route',
+        'route_name',
+        'group_name',
+        'parent_menu',
         'permission_slug',
         'role_slug',
         'badge',
         'badge_color',
         'sort_order',
+        'show_in_sidebar',
         'is_active',
     ];
 

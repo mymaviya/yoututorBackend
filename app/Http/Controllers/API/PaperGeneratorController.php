@@ -19,17 +19,21 @@ class PaperGeneratorController extends Controller
     ) {
         $data = $request->validate([
             'paper_blueprint_id' => 'required|exists:paper_blueprints,id',
+            'moderate_mode' => 'nullable|boolean',
         ]);
 
         $blueprint = PaperBlueprint::with([
             'grade',
             'subject',
             'examName',
-            'sections',
-            'bloomLevels',
+            'sections.questionType',
+            'sections.bloomLevels',
         ])->findOrFail($data['paper_blueprint_id']);
 
-        $result = $generator->generate($blueprint);
+        $result = $generator->generate(
+            $blueprint,
+            $request->boolean('moderate_mode')
+        );
 
         return response()->json([
             'message' => 'Paper preview generated successfully',
@@ -37,27 +41,31 @@ class PaperGeneratorController extends Controller
         ]);
     }
 
-    public function generate(
-        Request $request,
-        AutoPaperGeneratorService $generator
-    ) {
+    public function generate(Request $request, AutoPaperGeneratorService $generator)
+    {
         $data = $request->validate([
             'paper_blueprint_id' => 'required|exists:paper_blueprints,id',
             'title' => 'nullable|string|max:255',
+            'exam_name_id' => 'nullable|exists:exam_names,id',
             'exam_name' => 'nullable|string|max:255',
             'duration' => 'nullable|string|max:255',
+            'duration_minutes' => 'nullable|integer',
             'instructions' => 'nullable|string',
+            'moderate_mode' => 'nullable|boolean',
         ]);
 
         $blueprint = PaperBlueprint::with([
             'grade',
             'subject',
             'examName',
-            'sections',
-            'bloomLevels',
+            'sections.questionType',
+            'sections.bloomLevels',
         ])->findOrFail($data['paper_blueprint_id']);
 
-        $result = $generator->generate($blueprint);
+        $result = $generator->generate(
+            $blueprint,
+            $request->boolean('moderate_mode')
+        );
 
         if (!empty($result['shortages'])) {
             return response()->json([
@@ -70,12 +78,20 @@ class PaperGeneratorController extends Controller
         return DB::transaction(function () use ($data, $blueprint, $result) {
             $paper = QuestionPaper::create([
                 'grade_id' => $blueprint->grade_id,
+                'stream_id' => $blueprint->stream_id,
                 'subject_id' => $blueprint->subject_id,
-                'title' => $data['title'] ?? $blueprint->title,
-                'exam_name' => $data['exam_name'] ?? $blueprint->examName?->name,
-                'duration' => $data['duration'] ?? null,
+                'exam_name_id' => $data['exam_name_id'] ?? $blueprint->exam_name_id ?? null,
+                'paper_blueprint_id' => $blueprint->id,
+                'title' => $data['title'] ?? $blueprint->name,
+                'exam_type' => $data['exam_name']
+                    ?? $blueprint->examName?->name
+                    ?? 'Generated Paper',
+                'duration_minutes' => $data['duration_minutes']
+                    ?? $blueprint->duration_minutes
+                    ?? null,
                 'instructions' => $data['instructions'] ?? null,
                 'total_marks' => $result['total_marks'],
+                'status' => 'draft',
                 'created_by' => auth()->id(),
             ]);
 
@@ -87,7 +103,7 @@ class PaperGeneratorController extends Controller
                         $paper->questions()->create([
                             'question_id' => $question->id,
                             'marks' => $item['marks_per_question'],
-                            'section_name' => $section['section_name'],
+                            'section' => $section['section_name'],
                             'sort_order' => $sortOrder++,
                         ]);
                     }
@@ -97,7 +113,7 @@ class PaperGeneratorController extends Controller
             AuditService::log(
                 'Paper Generation',
                 'Generated question paper from blueprint',
-                "Generated paper '{$paper->title}' (ID: {$paper->id}) from blueprint '{$blueprint->title}' (ID: {$blueprint->id})",
+                "Generated paper '{$paper->title}' (ID: {$paper->id}) from blueprint '{$blueprint->name}' (ID: {$blueprint->id})",
                 null,
                 $paper->toArray(),
                 auth()->id()

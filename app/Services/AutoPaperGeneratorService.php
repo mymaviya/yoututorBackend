@@ -11,20 +11,26 @@ class AutoPaperGeneratorService
     protected array $usedQuestionIds = [];
     protected array $shortages = [];
 
-    public function generate(PaperBlueprint $blueprint): array
+    public function generate(PaperBlueprint $blueprint, bool $moderateMode = false): array
     {
         $this->usedQuestionIds = [];
         $this->shortages = [];
 
-        $paperSections = [];
-
-        $blueprint->load([
+        $blueprint->loadMissing([
             'grade',
             'subject',
             'examName',
-            'sections',
-            'bloomLevels',
+            'sections.questionType',
+            'sections.bloomLevels',
         ]);
+
+        $paperSections = [];
+        $globalBloomLevels = $this->getGlobalBloomLevels($blueprint);
+        $remainingBloomCounts = $globalBloomLevels
+            ->mapWithKeys(fn ($bloom) => [
+                $bloom['bloom_level'] => (int) $bloom['calculated_count'],
+            ])
+            ->toArray();
 
         $sections = $this->formatSections($blueprint);
 
@@ -34,13 +40,22 @@ class AutoPaperGeneratorService
             foreach ($section['items'] as $item) {
                 $questions = $this->pickQuestions(
                     blueprint: $blueprint,
-                    item: $item
+                    item: $item,
+                    remainingBloomCounts: $remainingBloomCounts,
+                    moderateMode: $moderateMode
                 );
+
+                foreach ($questions as $question) {
+                    if ($question->bloom_level && isset($remainingBloomCounts[$question->bloom_level])) {
+                        $remainingBloomCounts[$question->bloom_level]--;
+                    }
+                }
 
                 $sectionQuestions[] = [
                     'question_type' => $item['question_type'],
+                    'question_type_name' => $item['question_type_name'],
+                    'question_type_master_id' => $item['question_type_master_id'],
                     'difficulty' => $item['difficulty'] ?? null,
-                    'bloom_level' => $item['bloom_level'] ?? null,
                     'required_count' => (int) $item['question_count'],
                     'marks_per_question' => (float) $item['marks_per_question'],
                     'questions' => $questions,
@@ -54,8 +69,11 @@ class AutoPaperGeneratorService
             ];
         }
 
+        $this->validateBloomCompletion($remainingBloomCounts);
+
         return [
             'blueprint' => $blueprint,
+            'bloom_levels' => $globalBloomLevels,
             'sections' => $paperSections,
             'shortages' => $this->shortages,
             'total_questions' => collect($paperSections)
@@ -70,53 +88,120 @@ class AutoPaperGeneratorService
         ];
     }
 
-    protected function pickQuestions(PaperBlueprint $blueprint, array $item): Collection
-    {
+    protected function pickQuestions(
+        PaperBlueprint $blueprint,
+        array $item,
+        array $remainingBloomCounts,
+        bool $moderateMode
+    ): Collection {
         $requiredCount = (int) $item['question_count'];
+        $picked = collect();
 
-        $query = Question::with([
+        $activeBloomLevels = collect($remainingBloomCounts)
+            ->filter(fn ($count) => (int) $count > 0)
+            ->keys()
+            ->values();
+
+        foreach ($activeBloomLevels as $bloomLevel) {
+            if ($picked->count() >= $requiredCount) {
+                break;
+            }
+
+            $neededForItem = $requiredCount - $picked->count();
+            $neededForBloom = (int) ($remainingBloomCounts[$bloomLevel] ?? 0);
+            $limit = min($neededForItem, $neededForBloom);
+
+            if ($limit <= 0) {
+                continue;
+            }
+
+            $questions = $this->baseQuestionQuery($blueprint, $item, $moderateMode)
+                ->where('bloom_level', $bloomLevel)
+                ->whereNotIn('id', array_merge($this->usedQuestionIds, $picked->pluck('id')->toArray()))
+                ->inRandomOrder()
+                ->limit($limit)
+                ->get();
+
+            $picked = $picked->merge($questions);
+        }
+
+        if ($picked->count() < $requiredCount) {
+            $fallback = $this->baseQuestionQuery($blueprint, $item, $moderateMode)
+                ->whereNotIn('id', array_merge($this->usedQuestionIds, $picked->pluck('id')->toArray()))
+                ->inRandomOrder()
+                ->limit($requiredCount - $picked->count())
+                ->get();
+
+            $picked = $picked->merge($fallback);
+        }
+
+        if ($picked->count() < $requiredCount) {
+            $this->shortages[] = [
+                'question_type' => $item['question_type'],
+                'question_type_name' => $item['question_type_name'],
+                'difficulty' => $moderateMode ? 'Bypassed' : ($item['difficulty'] ?? null),
+                'required' => $requiredCount,
+                'available' => $picked->count(),
+                'missing' => $requiredCount - $picked->count(),
+            ];
+        }
+
+        $this->usedQuestionIds = array_merge(
+            $this->usedQuestionIds,
+            $picked->pluck('id')->toArray()
+        );
+
+        return $picked->values();
+    }
+
+    protected function baseQuestionQuery(PaperBlueprint $blueprint, array $item, bool $moderateMode)
+    {
+        return Question::with([
             'grade',
             'subject',
             'lesson',
+            'type',
             'options',
             'matchPairs',
         ])
             ->where('status', 'approved')
             ->where('grade_id', $blueprint->grade_id)
             ->where('subject_id', $blueprint->subject_id)
-            ->where('type', $item['question_type'])
-            ->whereNotIn('id', $this->usedQuestionIds);
+            ->where('question_type_master_id', $item['question_type_master_id'])
+            ->when($blueprint->stream_id, fn ($q) => $q->where('stream_id', $blueprint->stream_id))
+            ->when(!$moderateMode && !empty($item['difficulty']), fn ($q) => $q->where('difficulty', $item['difficulty']));
+    }
 
-        if (!empty($item['difficulty'])) {
-            $query->where('difficulty', $item['difficulty']);
+    protected function validateBloomCompletion(array $remainingBloomCounts): void
+    {
+        foreach ($remainingBloomCounts as $bloomLevel => $remaining) {
+            if ((int) $remaining > 0) {
+                $this->shortages[] = [
+                    'type' => 'bloom',
+                    'bloom_level' => $bloomLevel,
+                    'required_missing' => (int) $remaining,
+                    'message' => ucfirst($bloomLevel) . " still requires {$remaining} question(s).",
+                ];
+            }
+        }
+    }
+
+    protected function getGlobalBloomLevels(PaperBlueprint $blueprint): Collection
+    {
+        foreach ($blueprint->sections as $section) {
+            if ($section->bloomLevels && $section->bloomLevels->isNotEmpty()) {
+                return $section->bloomLevels
+                    ->filter(fn ($bloom) => (int) $bloom->calculated_count > 0)
+                    ->map(fn ($bloom) => [
+                        'bloom_level' => $bloom->bloom_level,
+                        'percentage' => (float) $bloom->percentage,
+                        'calculated_count' => (int) $bloom->calculated_count,
+                    ])
+                    ->values();
+            }
         }
 
-        if (!empty($item['bloom_level'])) {
-            $query->where('bloom_level', $item['bloom_level']);
-        }
-
-        $questions = $query
-            ->inRandomOrder()
-            ->limit($requiredCount)
-            ->get();
-
-        if ($questions->count() < $requiredCount) {
-            $this->shortages[] = [
-                'question_type' => $item['question_type'],
-                'difficulty' => $item['difficulty'] ?? null,
-                'bloom_level' => $item['bloom_level'] ?? null,
-                'required' => $requiredCount,
-                'available' => $questions->count(),
-                'missing' => $requiredCount - $questions->count(),
-            ];
-        }
-
-        $this->usedQuestionIds = array_merge(
-            $this->usedQuestionIds,
-            $questions->pluck('id')->toArray()
-        );
-
-        return $questions;
+        return collect();
     }
 
     protected function formatSections(PaperBlueprint $blueprint): array
@@ -138,11 +223,12 @@ class AutoPaperGeneratorService
                     'instructions' => $first->instructions,
                     'items' => $rows->values()->map(function ($row) {
                         return [
-                            'question_type' => $row->question_type,
+                            'question_type_master_id' => $row->question_type_master_id,
+                            'question_type' => $row->questionType?->slug,
+                            'question_type_name' => $row->questionType?->name,
                             'difficulty' => $row->difficulty,
-                            'bloom_level' => $row->bloom_level,
-                            'question_count' => $row->question_count,
-                            'marks_per_question' => $row->marks_per_question,
+                            'question_count' => (int) $row->question_count,
+                            'marks_per_question' => (float) $row->marks_per_question,
                         ];
                     })->toArray(),
                 ];

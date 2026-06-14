@@ -57,21 +57,12 @@ class QuestionTypesImport implements ToCollection
                 $streamId = $stream->id;
             }
 
-            $subjectQuery = Subject::where('grade_id', $grade->id)
-                ->whereRaw('LOWER(name) = ?', [strtolower($subjectName)]);
-
-            if ($streamId) {
-                $subjectQuery->where('stream_id', $streamId);
-            } else {
-                $subjectQuery->whereNull('stream_id');
-            }
-
-            $subject = $subjectQuery->first();
+            $subject = $this->findSubject($grade->id, $streamId, $subjectName);
 
             if (!$subject) {
-                $streamText = $streamName ? " ({$streamName})" : '';
+                $streamText = $streamName !== '' ? " ({$streamName})" : '';
                 $this->skipped++;
-                $this->errors[] = "Row {$rowNumber}: Subject not found - {$subjectName}{$streamText}.";
+                $this->errors[] = "Row {$rowNumber}: Subject not found - {$subjectName}{$streamText}. Apply Subject Template first.";
                 continue;
             }
 
@@ -106,6 +97,26 @@ class QuestionTypesImport implements ToCollection
                 $this->errors[] = "Row {$rowNumber}: Already assigned - {$typeName} for {$gradeName} / {$subjectName}.";
             }
         }
+    }
+
+    private function findSubject(int $gradeId, ?int $streamId, string $subjectName): ?Subject
+    {
+        $normalized = strtolower(trim($subjectName));
+
+        return Subject::where('grade_id', $gradeId)
+            ->where(function ($q) use ($streamId) {
+                $q->whereNull('stream_id');
+
+                if ($streamId) {
+                    $q->orWhere('stream_id', $streamId);
+                }
+            })
+            ->where(function ($q) use ($normalized) {
+                $q->whereRaw('LOWER(name) = ?', [$normalized])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ["%{$normalized}%"])
+                    ->orWhereRaw('? LIKE CONCAT("%", LOWER(name), "%")', [$normalized]);
+            })
+            ->first();
     }
 
     private function questionTypeDefaults(string $slug): array

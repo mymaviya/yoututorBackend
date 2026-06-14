@@ -27,8 +27,19 @@ class TeacherQuestionTaskController extends Controller
             ->where('grade_id', $task->grade_id)
             ->where('subject_id', $task->subject_id)
             ->where('question_type_master_id', $task->question_type_master_id)
-            ->when($task->stream_id, fn ($q) => $q->where('stream_id', $task->stream_id))
-            ->when($task->lesson_id, fn ($q) => $q->where('lesson_id', $task->lesson_id))
+
+            ->where(function ($q) use ($task) {
+                $q->whereNull('stream_id');
+
+                if ($task->stream_id) {
+                    $q->orWhere('stream_id', $task->stream_id);
+                }
+            })
+
+            ->when($task->lesson_id, function ($q) use ($task) {
+                $q->where('lesson_id', $task->lesson_id);
+            })
+
             ->count();
     }
 

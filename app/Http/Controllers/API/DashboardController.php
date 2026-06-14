@@ -19,7 +19,7 @@ class DashboardController extends Controller
         return User::query()
             ->where(function ($q) {
                 $q->where('role', 'teacher')
-                    ->orWhereHas('roleData', fn ($role) => $role->where('slug', 'teacher'));
+                    ->orWhereHas('roleData', fn($role) => $role->where('slug', 'teacher'));
             });
     }
 
@@ -49,14 +49,18 @@ class DashboardController extends Controller
                 'exam_portion_status' => ExamPortion::select('status', DB::raw('COUNT(*) as total'))->groupBy('status')->get(),
                 'questions_by_grade' => Question::join('grades', 'questions.grade_id', '=', 'grades.id')->select('grades.name as grade_name', DB::raw('COUNT(*) as total'))->groupBy('grades.id', 'grades.name')->get(),
                 'questions_by_subject' => Question::join('subjects', 'questions.subject_id', '=', 'subjects.id')->select('subjects.name as subject_name', DB::raw('COUNT(*) as total'))->groupBy('subjects.id', 'subjects.name')->get(),
-                'teacher_performance' => $teachers->map(fn ($teacher) => [
+                'teacher_performance' => $teachers->map(fn($teacher) => [
                     'name' => $teacher->name,
                     'questions_count' => Question::where('created_by', $teacher->id)->count(),
                     'approved_questions' => Question::where('created_by', $teacher->id)->where('status', 'approved')->count(),
                     'exam_portions_submitted' => ExamPortion::where('teacher_id', $teacher->id)->whereIn('status', ['submitted', 'approved'])->count(),
                 ])->sortByDesc('questions_count')->values()->take(10),
             ],
-            'teacher_progress' => $teachers->map(fn ($teacher) => [
+            'recent_exam_portions' => ExamPortion::with(['teacher', 'grade', 'stream', 'subject', 'examName'])
+                ->latest()
+                ->take(6)
+                ->get(),
+            'teacher_progress' => $teachers->map(fn($teacher) => [
                 'teacher_id' => $teacher->id,
                 'name' => $teacher->name,
                 'contact' => $teacher->contact,

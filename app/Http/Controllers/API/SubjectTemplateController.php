@@ -23,7 +23,8 @@ class SubjectTemplateController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255', 'unique:subject_templates,name'],
             'subjects' => ['required', 'array', 'min:1'],
-            'subjects.*' => ['required', 'string', 'max:255'],
+            'subjects.*.subject_name' => ['required', 'string', 'max:255'],
+            'subjects.*.is_common' => ['nullable', 'boolean'],
             'is_active' => ['boolean'],
         ]);
 
@@ -35,7 +36,8 @@ class SubjectTemplateController extends Controller
 
             foreach ($validated['subjects'] as $subject) {
                 $template->items()->create([
-                    'subject_name' => trim($subject),
+                    'subject_name' => trim($subject['subject_name']),
+                    'is_common' => (bool) ($subject['is_common'] ?? false),
                 ]);
             }
 
@@ -53,7 +55,8 @@ class SubjectTemplateController extends Controller
                 Rule::unique('subject_templates', 'name')->ignore($subjectTemplate->id),
             ],
             'subjects' => ['required', 'array', 'min:1'],
-            'subjects.*' => ['required', 'string', 'max:255'],
+            'subjects.*.subject_name' => ['required', 'string', 'max:255'],
+            'subjects.*.is_common' => ['nullable', 'boolean'],
             'is_active' => ['boolean'],
         ]);
 
@@ -67,7 +70,8 @@ class SubjectTemplateController extends Controller
 
             foreach ($validated['subjects'] as $subject) {
                 $subjectTemplate->items()->create([
-                    'subject_name' => trim($subject),
+                    'subject_name' => trim($subject['subject_name']),
+                    'is_common' => (bool) ($subject['is_common'] ?? false),
                 ]);
             }
 
@@ -100,9 +104,21 @@ class SubjectTemplateController extends Controller
 
             foreach ($validated['grade_ids'] as $gradeId) {
                 foreach ($subjectTemplate->items as $item) {
+                    $subjectName = trim($item->subject_name);
+
+                    $streamId = $item->is_common
+                        ? null
+                        : ($validated['stream_id'] ?? null);
+
                     $exists = Subject::where('grade_id', $gradeId)
-                        ->where('stream_id', $validated['stream_id'] ?? null)
-                        ->whereRaw('LOWER(name) = ?', [strtolower($item->subject_name)])
+                        ->where(function ($q) use ($streamId) {
+                            if ($streamId) {
+                                $q->where('stream_id', $streamId);
+                            } else {
+                                $q->whereNull('stream_id');
+                            }
+                        })
+                        ->whereRaw('LOWER(name) = ?', [strtolower($subjectName)])
                         ->exists();
 
                     if ($exists) {
@@ -112,8 +128,8 @@ class SubjectTemplateController extends Controller
 
                     Subject::create([
                         'grade_id' => $gradeId,
-                        'stream_id' => $validated['stream_id'] ?? null,
-                        'name' => $item->subject_name,
+                        'stream_id' => $streamId,
+                        'name' => $subjectName,
                         'is_active' => true,
                     ]);
 

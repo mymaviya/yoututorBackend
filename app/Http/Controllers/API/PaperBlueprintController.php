@@ -13,13 +13,30 @@ class PaperBlueprintController extends Controller
 {
     private function relationships(): array
     {
-        return ['grade', 'stream', 'subject', 'examName', 'sections.questionType'];
+        return [
+            'grade',
+            'stream',
+            'subject',
+            'examName',
+            'sections.questionType',
+            'sections.bloomLevels',
+        ];
     }
 
     private function resolveQuestionTypeId($value): ?int
     {
-        if (is_numeric($value)) return (int) $value;
-        return QuestionTypeMaster::where('slug', $value)->orWhere('name', $value)->value('id');
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        return QuestionTypeMaster::where('slug', $value)
+            ->orWhere('name', $value)
+            ->value('id');
+    }
+
+    private function calculateBloomCount($percentage, $questionCount): int
+    {
+        return (int) round(((float) $percentage / 100) * (int) $questionCount);
     }
 
     private function formatBlueprint(PaperBlueprint $blueprint)
@@ -31,20 +48,26 @@ class PaperBlueprintController extends Controller
                 ->values()
                 ->map(function ($rows) {
                     $first = $rows->first();
+
                     return [
                         'id' => $first->id,
                         'section_name' => $first->section_name,
                         'instructions' => $first->instructions,
-                        'items' => $rows->values()->map(fn ($row) => [
+                        'items' => $rows->values()->map(fn($row) => [
                             'id' => $row->id,
                             'question_type_master_id' => $row->question_type_master_id,
                             'question_type' => $row->questionType?->slug,
                             'question_type_name' => $row->questionType?->name,
                             'difficulty' => $row->difficulty,
-                            'bloom_level' => null,
-                            'question_count' => $row->question_count,
-                            'marks_per_question' => $row->marks_per_question,
+                            'question_count' => (int) $row->question_count,
+                            'marks_per_question' => (float) $row->marks_per_question,
                             'available_questions' => $row->available_questions ?? 0,
+                            'bloom_levels' => $row->bloomLevels->map(fn($bloom) => [
+                                'id' => $bloom->id,
+                                'bloom_level' => $bloom->bloom_level,
+                                'percentage' => (float) $bloom->percentage,
+                                'calculated_count' => (int) $bloom->calculated_count,
+                            ])->values(),
                         ]),
                     ];
                 })
@@ -57,13 +80,29 @@ class PaperBlueprintController extends Controller
     {
         $query = PaperBlueprint::with($this->relationships())->latest();
 
-        if ($request->filled('grade_id')) $query->where('grade_id', $request->grade_id);
-        if ($request->filled('stream_id')) $query->where('stream_id', $request->stream_id);
-        if ($request->filled('subject_id')) $query->where('subject_id', $request->subject_id);
-        if ($request->filled('exam_name_id')) $query->where('exam_name_id', $request->exam_name_id);
-        if ($request->filled('is_active')) $query->where('is_active', $request->boolean('is_active'));
+        if ($request->filled('grade_id')) {
+            $query->where('grade_id', $request->grade_id);
+        }
 
-        return response()->json($query->get()->map(fn ($bp) => $this->formatBlueprint($bp)));
+        if ($request->filled('stream_id')) {
+            $query->where('stream_id', $request->stream_id);
+        }
+
+        if ($request->filled('subject_id')) {
+            $query->where('subject_id', $request->subject_id);
+        }
+
+        if ($request->filled('exam_name_id')) {
+            $query->where('exam_name_id', $request->exam_name_id);
+        }
+
+        if ($request->filled('is_active')) {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        return response()->json(
+            $query->get()->map(fn($bp) => $this->formatBlueprint($bp))
+        );
     }
 
     public function store(Request $request)
@@ -78,15 +117,21 @@ class PaperBlueprintController extends Controller
             'duration' => 'nullable|integer',
             'total_marks' => 'required|numeric',
             'is_active' => 'boolean',
+
             'sections' => 'required|array|min:1',
             'sections.*.section_name' => 'required|string|max:255',
             'sections.*.instructions' => 'nullable|string',
             'sections.*.items' => 'required|array|min:1',
+
             'sections.*.items.*.question_type' => 'required_without:sections.*.items.*.question_type_master_id',
             'sections.*.items.*.question_type_master_id' => 'nullable|exists:question_type_masters,id',
             'sections.*.items.*.difficulty' => 'nullable|string|max:255',
             'sections.*.items.*.question_count' => 'required|integer|min:1',
             'sections.*.items.*.marks_per_question' => 'required|numeric|min:0',
+
+            'bloom_levels' => 'nullable|array',
+            'bloom_levels.*.bloom_level' => 'required_with:bloom_levels|in:remember,understand,apply,analyze,evaluate,create',
+            'bloom_levels.*.percentage' => 'required_with:bloom_levels|numeric|min:0|max:100',
         ]);
 
         return DB::transaction(function () use ($data) {
@@ -101,13 +146,38 @@ class PaperBlueprintController extends Controller
                 'is_active' => $data['is_active'] ?? true,
             ]);
 
+            $totalQuestions = $this->calculateTotalQuestions($data['sections']);
+
+            $useBloomLevels = (bool) ($data['use_bloom_levels'] ?? false);
+
+            $globalBloomLevels = $useBloomLevels
+                ? collect($data['bloom_levels'] ?? [])
+                ->filter(function ($bloom) {
+                    return !empty($bloom['bloom_level'])
+                        && isset($bloom['percentage'])
+                        && (float) $bloom['percentage'] > 0;
+                })
+                ->values()
+                ->toArray()
+                : [];
+
+            $globalBloomCounts = $this->calculateGlobalBloomCounts(
+                $globalBloomLevels,
+                $totalQuestions
+            );
+
+            $bloomSaved = false;
+
             foreach ($data['sections'] as $sectionIndex => $section) {
                 foreach ($section['items'] as $itemIndex => $item) {
-                    $questionTypeId = $item['question_type_master_id'] ?? $this->resolveQuestionTypeId($item['question_type'] ?? null);
+                    $questionTypeId = $item['question_type_master_id']
+                        ?? $this->resolveQuestionTypeId($item['question_type'] ?? null);
 
-                    if (!$questionTypeId) continue;
+                    if (!$questionTypeId) {
+                        continue;
+                    }
 
-                    $blueprint->sections()->create([
+                    $blueprintSection = $blueprint->sections()->create([
                         'section_name' => $section['section_name'],
                         'instructions' => $section['instructions'] ?? null,
                         'question_type_master_id' => $questionTypeId,
@@ -116,26 +186,46 @@ class PaperBlueprintController extends Controller
                         'marks_per_question' => $item['marks_per_question'],
                         'sort_order' => (($sectionIndex + 1) * 100) + ($itemIndex + 1),
                     ]);
+
+                    if (!$bloomSaved && count($globalBloomLevels)) {
+                        foreach ($globalBloomLevels as $bloom) {
+                            $level = strtolower($bloom['bloom_level']);
+                            $percentage = (float) ($bloom['percentage'] ?? 0);
+
+                            $blueprintSection->bloomLevels()->create([
+                                'bloom_level' => $level,
+                                'percentage' => $percentage,
+                                'calculated_count' => $globalBloomCounts[$level] ?? 0,
+                            ]);
+                        }
+
+                        $bloomSaved = true;
+                    }
                 }
             }
 
             return response()->json([
                 'message' => 'Paper blueprint created successfully',
-                'data' => $this->formatBlueprint($blueprint->load($this->relationships())),
+                'data' => $this->formatBlueprint($blueprint->fresh()->load($this->relationships())),
             ], 201);
         });
     }
 
     public function show($id)
     {
-        return response()->json($this->formatBlueprint(PaperBlueprint::with($this->relationships())->findOrFail($id)));
+        return response()->json(
+            $this->formatBlueprint(
+                PaperBlueprint::with($this->relationships())->findOrFail($id)
+            )
+        );
     }
 
     public function update(Request $request, $id)
     {
         $blueprint = PaperBlueprint::findOrFail($id);
+
         $data = $request->validate([
-            'name' => 'required|string|max:255',
+            'name' => 'nullable|string|max:255',
             'grade_id' => 'required|exists:grades,id',
             'stream_id' => 'nullable|exists:streams,id',
             'subject_id' => 'required|exists:subjects,id',
@@ -144,12 +234,27 @@ class PaperBlueprintController extends Controller
             'duration' => 'nullable|integer',
             'total_marks' => 'required|numeric',
             'is_active' => 'boolean',
+
             'sections' => 'required|array|min:1',
+            'sections.*.section_name' => 'required|string|max:255',
+            'sections.*.instructions' => 'nullable|string',
+            'sections.*.items' => 'required|array|min:1',
+
+            'sections.*.items.*.question_type' => 'required_without:sections.*.items.*.question_type_master_id',
+            'sections.*.items.*.question_type_master_id' => 'nullable|exists:question_type_masters,id',
+            'sections.*.items.*.difficulty' => 'nullable|string|max:255',
+            'sections.*.items.*.question_count' => 'required|integer|min:1',
+            'sections.*.items.*.marks_per_question' => 'required|numeric|min:0',
+
+            'use_bloom_levels' => 'nullable|boolean',
+            'bloom_levels.*.bloom_level' => 'required_with:bloom_levels|in:remember,understand,apply,analyze,evaluate,create',
+            'bloom_levels.*.percentage' => 'required_with:bloom_levels|numeric|min:0|max:100',
+
         ]);
 
         return DB::transaction(function () use ($blueprint, $data) {
             $blueprint->update([
-                'name' => $data['name'],
+                'name' => $data['name'] ?? $blueprint->name,
                 'grade_id' => $data['grade_id'],
                 'stream_id' => $data['stream_id'] ?? null,
                 'subject_id' => $data['subject_id'],
@@ -159,13 +264,46 @@ class PaperBlueprintController extends Controller
                 'is_active' => $data['is_active'] ?? true,
             ]);
 
+            $sectionIds = $blueprint->sections()->pluck('id');
+
+            DB::table('paper_blueprint_bloom_levels')
+                ->whereIn('paper_blueprint_section_id', $sectionIds)
+                ->delete();
+
             $blueprint->sections()->delete();
 
+            $totalQuestions = $this->calculateTotalQuestions($data['sections']);
+
+            $useBloomLevels = (bool) ($data['use_bloom_levels'] ?? false);
+
+            $globalBloomLevels = $useBloomLevels
+                ? collect($data['bloom_levels'] ?? [])
+                ->filter(function ($bloom) {
+                    return !empty($bloom['bloom_level'])
+                        && isset($bloom['percentage'])
+                        && (float) $bloom['percentage'] > 0;
+                })
+                ->values()
+                ->toArray()
+                : [];
+
+            $globalBloomCounts = $this->calculateGlobalBloomCounts(
+                $globalBloomLevels,
+                $totalQuestions
+            );
+
+            $bloomSaved = false;
+
             foreach ($data['sections'] as $sectionIndex => $section) {
-                foreach (($section['items'] ?? []) as $itemIndex => $item) {
-                    $questionTypeId = $item['question_type_master_id'] ?? $this->resolveQuestionTypeId($item['question_type'] ?? null);
-                    if (!$questionTypeId) continue;
-                    $blueprint->sections()->create([
+                foreach ($section['items'] as $itemIndex => $item) {
+                    $questionTypeId = $item['question_type_master_id']
+                        ?? $this->resolveQuestionTypeId($item['question_type'] ?? null);
+
+                    if (!$questionTypeId) {
+                        continue;
+                    }
+
+                    $blueprintSection = $blueprint->sections()->create([
                         'section_name' => $section['section_name'],
                         'instructions' => $section['instructions'] ?? null,
                         'question_type_master_id' => $questionTypeId,
@@ -174,6 +312,21 @@ class PaperBlueprintController extends Controller
                         'marks_per_question' => $item['marks_per_question'],
                         'sort_order' => (($sectionIndex + 1) * 100) + ($itemIndex + 1),
                     ]);
+
+                    if (!$bloomSaved && count($globalBloomLevels)) {
+                        foreach ($globalBloomLevels as $bloom) {
+                            $level = strtolower($bloom['bloom_level']);
+                            $percentage = (float) ($bloom['percentage'] ?? 0);
+
+                            $blueprintSection->bloomLevels()->create([
+                                'bloom_level' => $level,
+                                'percentage' => $percentage,
+                                'calculated_count' => $globalBloomCounts[$level] ?? 0,
+                            ]);
+                        }
+
+                        $bloomSaved = true;
+                    }
                 }
             }
 
@@ -187,14 +340,24 @@ class PaperBlueprintController extends Controller
     public function destroy($id)
     {
         PaperBlueprint::findOrFail($id)->delete();
-        return response()->json(['message' => 'Paper blueprint deleted successfully']);
+
+        return response()->json([
+            'message' => 'Paper blueprint deleted successfully',
+        ]);
     }
 
     public function status($id)
     {
         $blueprint = PaperBlueprint::findOrFail($id);
-        $blueprint->update(['is_active' => !$blueprint->is_active]);
-        return response()->json(['message' => 'Blueprint status updated successfully', 'data' => $blueprint]);
+
+        $blueprint->update([
+            'is_active' => !$blueprint->is_active,
+        ]);
+
+        return response()->json([
+            'message' => 'Blueprint status updated successfully',
+            'data' => $blueprint,
+        ]);
     }
 
     public function dropdown(Request $request)
@@ -208,8 +371,44 @@ class PaperBlueprintController extends Controller
             ->where('grade_id', $blueprint->grade_id)
             ->where('subject_id', $blueprint->subject_id)
             ->where('question_type_master_id', $section->question_type_master_id)
-            ->when($blueprint->stream_id, fn ($q) => $q->where('stream_id', $blueprint->stream_id))
-            ->when($section->difficulty, fn ($q) => $q->where('difficulty', $section->difficulty))
+            ->when($blueprint->stream_id, fn($q) => $q->where('stream_id', $blueprint->stream_id))
+            ->when($section->difficulty, fn($q) => $q->where('difficulty', $section->difficulty))
             ->count();
+    }
+
+    private function calculateTotalQuestions(array $sections): int
+    {
+        $total = 0;
+
+        foreach ($sections as $section) {
+            foreach (($section['items'] ?? []) as $item) {
+                $total += (int) ($item['question_count'] ?? 0);
+            }
+        }
+
+        return $total;
+    }
+
+    private function calculateGlobalBloomCounts(array $bloomLevels, int $totalQuestions): array
+    {
+        $counts = [];
+        $used = 0;
+
+        foreach ($bloomLevels as $index => $bloom) {
+            $percentage = (float) ($bloom['percentage'] ?? 0);
+            $count = (int) floor(($percentage / 100) * $totalQuestions);
+
+            $counts[$bloom['bloom_level']] = $count;
+            $used += $count;
+        }
+
+        $remaining = $totalQuestions - $used;
+
+        if ($remaining > 0 && !empty($bloomLevels[0]['bloom_level'])) {
+            $firstLevel = $bloomLevels[0]['bloom_level'];
+            $counts[$firstLevel] += $remaining;
+        }
+
+        return $counts;
     }
 }

@@ -14,7 +14,7 @@ class NotificationController extends Controller
             ->latest()
             ->get()
             ->groupBy(function ($item) {
-                return $item->type . '|' . $item->url;
+                return $item->type . '|' . $item->route;
             })
             ->map(function ($group) {
                 $latest = $group->first();
@@ -24,7 +24,8 @@ class NotificationController extends Controller
                     'title' => $latest->title,
                     'message' => $latest->message,
                     'type' => $latest->type,
-                    'url' => $latest->url,
+                    'url' => $latest->route,
+                    'route' => $latest->route,
                     'is_read' => $group->every(fn($n) => $n->is_read),
                     'count' => $group->count(),
                     'created_at' => $latest->created_at,
@@ -39,9 +40,10 @@ class NotificationController extends Controller
     public function unreadCount()
     {
         return response()->json([
+            'auth_user' => auth()->id(),
             'count' => AppNotification::where('user_id', auth()->id())
                 ->where('is_read', false)
-                ->count()
+                ->count(),
         ]);
     }
 
@@ -76,7 +78,7 @@ class NotificationController extends Controller
     {
         $data = $request->validate([
             'ids' => 'required|array',
-            'ids.*' => 'exists:notifications,id',
+            'ids.*' => 'exists:app_notifications,id',
         ]);
 
         AppNotification::where('user_id', auth()->id())

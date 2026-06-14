@@ -9,64 +9,121 @@ use Illuminate\Http\Request;
 
 class AutoPaperGeneratorController extends Controller
 {
-    public function generate(Request $request)
+    private function normalize($value): string
     {
-        $data = $request->validate([
-            'blueprint_id' => 'required|exists:paper_blueprints,id',
-            'lesson_id' => 'nullable|exists:lessons,id',
+        return strtolower(trim((string) $value));
+    }
+
+    public function generateFromBlueprint(Request $request)
+    {
+        $request->validate([
+            'paper_blueprint_id' => 'required|exists:paper_blueprints,id',
+            'moderate_mode' => 'nullable|boolean',
         ]);
 
-        $blueprint = PaperBlueprint::with(['sections.questionType'])->findOrFail($data['blueprint_id']);
+        $moderateMode = $request->boolean('moderate_mode');
 
-        $usedQuestionIds = [];
-        $sections = [];
+        $blueprint = PaperBlueprint::with([
+            'sections.questionType',
+            'sections.bloomLevels',
+        ])->findOrFail($request->paper_blueprint_id);
+
+        $selectedQuestions = collect();
+        $errors = [];
 
         foreach ($blueprint->sections as $section) {
-            $sectionName = $section->section_name;
+            $bloomRules = $section->bloomLevels;
 
-            if (!isset($sections[$sectionName])) {
-                $sections[$sectionName] = [
-                    'name' => $sectionName,
-                    'instructions' => $section->instructions,
-                    'groups' => [],
-                    'questions' => [],
-                ];
+            if ($bloomRules->isNotEmpty()) {
+                foreach ($bloomRules as $bloomRule) {
+                    $query = $this->baseQuestionQuery($blueprint, $section, $moderateMode)
+                        ->where('bloom_level', $bloomRule->bloom_level)
+                        ->whereNotIn('id', $selectedQuestions->pluck('id'));
+
+                    $questions = $query
+                        ->inRandomOrder()
+                        ->limit((int) $bloomRule->calculated_count)
+                        ->get();
+
+                    if ($questions->count() < (int) $bloomRule->calculated_count) {
+                        $errors[] = "{$section->section_name} - {$section->questionType?->name} - "
+                            . ucfirst($bloomRule->bloom_level)
+                            . ": required {$bloomRule->calculated_count}, available {$questions->count()}";
+                    }
+
+                    $selectedQuestions = $selectedQuestions->merge(
+                        $questions->map(fn ($question) => $this->formatQuestion($question, $section))
+                    );
+                }
+
+                continue;
             }
 
-            $questions = Question::with(['options', 'matchPairs', 'type'])
-                ->where('status', 'approved')
-                ->where('grade_id', $blueprint->grade_id)
-                ->where('subject_id', $blueprint->subject_id)
-                ->where('question_type_master_id', $section->question_type_master_id)
-                ->when($blueprint->stream_id, fn ($q) => $q->where('stream_id', $blueprint->stream_id))
-                ->when($data['lesson_id'] ?? null, fn ($q) => $q->where('lesson_id', $data['lesson_id']))
-                ->when($section->difficulty, fn ($q) => $q->where('difficulty', $section->difficulty))
-                ->whereNotIn('id', $usedQuestionIds)
+            $query = $this->baseQuestionQuery($blueprint, $section, $moderateMode)
+                ->whereNotIn('id', $selectedQuestions->pluck('id'));
+
+            $questions = $query
                 ->inRandomOrder()
-                ->take($section->question_count)
+                ->limit((int) $section->question_count)
                 ->get();
 
-            $usedQuestionIds = array_merge($usedQuestionIds, $questions->pluck('id')->toArray());
+            if ($questions->count() < (int) $section->question_count) {
+                $errors[] = "{$section->section_name} - {$section->questionType?->name}: required {$section->question_count}, available {$questions->count()}";
+            }
 
-            $questions = $questions->map(function ($question) use ($section) {
-                $question->marks = $section->marks_per_question;
-                $question->type_slug = $question->type?->slug;
-                return $question;
-            });
-
-            $sections[$sectionName]['groups'][] = [
-                'question_type_master_id' => $section->question_type_master_id,
-                'type' => $section->questionType?->slug,
-                'question_type' => $section->questionType?->slug,
-                'question_type_name' => $section->questionType?->name,
-                'difficulty' => $section->difficulty,
-                'marks_per_question' => $section->marks_per_question,
-                'questions' => $questions,
-            ];
-
-            $sections[$sectionName]['questions'] = array_merge($sections[$sectionName]['questions'], $questions->toArray());
+            $selectedQuestions = $selectedQuestions->merge(
+                $questions->map(fn ($question) => $this->formatQuestion($question, $section))
+            );
         }
 
-        return response()->json(['sections' => array_values($sections)]);
+        if (!empty($errors)) {
+            return response()->json([
+                'message' => 'Auto generation failed.',
+                'errors' => [
+                    'blueprint' => $errors,
+                ],
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Paper generated successfully.',
+            'data' => $selectedQuestions->values(),
+        ]);
+    }
+
+    private function baseQuestionQuery(PaperBlueprint $blueprint, $section, bool $moderateMode)
+    {
+        return Question::with([
+                'type',
+                'options',
+                'matchPairs',
+                'lesson',
+            ])
+            ->where('status', 'approved')
+            ->where('grade_id', $blueprint->grade_id)
+            ->where('subject_id', $blueprint->subject_id)
+            ->where('question_type_master_id', $section->question_type_master_id)
+            ->when($blueprint->stream_id, fn ($q) => $q->where('stream_id', $blueprint->stream_id))
+            ->when(!$moderateMode && $section->difficulty, fn ($q) => $q->where('difficulty', $section->difficulty));
+    }
+
+    private function formatQuestion(Question $question, $section): array
+    {
+        return [
+            'id' => $question->id,
+            'question_id' => $question->id,
+            'question' => $question->question,
+            'type' => $question->type?->slug,
+            'question_type' => $question->type?->slug,
+            'question_type_master_id' => $question->question_type_master_id,
+            'difficulty' => $question->difficulty,
+            'bloom_level' => $question->bloom_level,
+            'marks' => (float) $section->marks_per_question,
+            'paper_section' => $section->section_name,
+            'section' => $section->section_name,
+            'options' => $question->options,
+            'match_pairs' => $question->matchPairs,
+            'lesson' => $question->lesson,
+        ];
     }
 }

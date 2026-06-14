@@ -49,9 +49,9 @@ class QuestionPaper extends Model
     }
 
     public function examName()
-    {
-        return $this->belongsTo(ExamName::class);
-    }
+{
+    return $this->belongsTo(ExamName::class, 'exam_name_id');
+}
 
     public function blueprint()
     {

@@ -45,11 +45,11 @@ class PaperBlueprintImport implements ToCollection
         foreach (array_slice($rows, 1) as $index => $row) {
             $rowNumber = $index + 2;
 
-            $blueprintName = trim($row[0] ?? '');
-            $gradeName = trim($row[1] ?? '');
-            $streamName = trim($row[2] ?? '');
-            $subjectName = trim($row[3] ?? '');
-            $examName = trim($row[4] ?? '');
+            $blueprintName = trim((string) ($row[0] ?? ''));
+            $gradeName = trim((string) ($row[1] ?? ''));
+            $streamName = trim((string) ($row[2] ?? ''));
+            $subjectName = trim((string) ($row[3] ?? ''));
+            $examName = trim((string) ($row[4] ?? ''));
             $durationMinutes = (int) ($row[5] ?? 0);
             $totalMarks = (float) ($row[6] ?? 0);
 
@@ -70,7 +70,7 @@ class PaperBlueprintImport implements ToCollection
 
             $streamId = null;
 
-            if ($streamName) {
+            if ($streamName !== '') {
                 $stream = Stream::whereRaw('LOWER(name) = ?', [strtolower($streamName)])
                     ->first();
 
@@ -83,15 +83,23 @@ class PaperBlueprintImport implements ToCollection
                 $streamId = $stream->id;
             }
 
-            $subject = $this->findOrCreateSubject(
-                $grade->id,
-                $streamId,
-                $subjectName
+            $subject = $this->findSubject(
+                gradeId: $grade->id,
+                streamId: $streamId,
+                subjectName: $subjectName
             );
+
+            if (!$subject) {
+                $streamText = $streamName !== '' ? " ({$streamName})" : '';
+
+                $this->skipped++;
+                $this->errors[] = "Blueprints Row {$rowNumber}: Subject not found - {$subjectName}{$streamText}. Apply Subject Template first.";
+                continue;
+            }
 
             $examNameModel = null;
 
-            if ($examName) {
+            if ($examName !== '') {
                 $examNameModel = ExamName::firstOrCreate(
                     ['name' => $examName],
                     ['is_active' => true]
@@ -130,13 +138,13 @@ class PaperBlueprintImport implements ToCollection
         foreach (array_slice($rows, 1) as $index => $row) {
             $rowNumber = $index + 2;
 
-            $blueprintName = trim($row[0] ?? '');
-            $sectionName = trim($row[1] ?? '');
-            $questionTypeSlug = trim($row[2] ?? '');
-            $difficulty = trim($row[3] ?? '');
+            $blueprintName = trim((string) ($row[0] ?? ''));
+            $sectionName = trim((string) ($row[1] ?? ''));
+            $questionTypeSlug = trim((string) ($row[2] ?? ''));
+            $difficulty = trim((string) ($row[3] ?? ''));
             $questionCount = (int) ($row[4] ?? 0);
             $marksPerQuestion = (float) ($row[5] ?? 0);
-            $instructions = trim($row[6] ?? '');
+            $instructions = trim((string) ($row[6] ?? ''));
             $sortOrder = (int) ($row[7] ?? 0);
 
             if (!$blueprintName || !$sectionName || !$questionTypeSlug || !$questionCount || !$marksPerQuestion) {
@@ -153,7 +161,9 @@ class PaperBlueprintImport implements ToCollection
                 continue;
             }
 
-            $questionType = QuestionTypeMaster::where('slug', $questionTypeSlug)->first();
+            $questionType = QuestionTypeMaster::where('slug', $questionTypeSlug)
+                ->orWhere('name', $questionTypeSlug)
+                ->first();
 
             if (!$questionType) {
                 $this->skipped++;
@@ -186,28 +196,23 @@ class PaperBlueprintImport implements ToCollection
         }
     }
 
-    private function findOrCreateSubject($gradeId, $streamId, $subjectName)
+    private function findSubject(int $gradeId, ?int $streamId, string $subjectName): ?Subject
     {
         $normalized = strtolower(trim($subjectName));
 
-        $subject = Subject::where('grade_id', $gradeId)
-            ->where('stream_id', $streamId)
+        return Subject::where('grade_id', $gradeId)
+            ->where(function ($q) use ($streamId) {
+                $q->whereNull('stream_id');
+
+                if ($streamId) {
+                    $q->orWhere('stream_id', $streamId);
+                }
+            })
             ->where(function ($q) use ($normalized) {
                 $q->whereRaw('LOWER(name) = ?', [$normalized])
                     ->orWhereRaw('LOWER(name) LIKE ?', ["%{$normalized}%"])
                     ->orWhereRaw('? LIKE CONCAT("%", LOWER(name), "%")', [$normalized]);
             })
             ->first();
-
-        if ($subject) {
-            return $subject;
-        }
-
-        return Subject::create([
-            'grade_id' => $gradeId,
-            'stream_id' => $streamId,
-            'name' => trim($subjectName),
-            'is_active' => true,
-        ]);
     }
 }

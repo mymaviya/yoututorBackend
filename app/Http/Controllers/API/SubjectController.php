@@ -9,38 +9,36 @@ use Illuminate\Validation\Rule;
 
 class SubjectController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
     public function index(Request $request)
     {
         $query = Subject::with(['grade', 'stream']);
 
-        // Filter by grade
         if ($request->filled('grade_id')) {
             $query->where('grade_id', $request->grade_id);
         }
 
-        // Filter by stream
-        // For Class 1-10 subjects, stream_id may be null.
-        // For Class 11-12 subjects, stream_id should be selected.
         if ($request->filled('stream_id')) {
-            $query->where('stream_id', $request->stream_id);
+            $streamId = $request->stream_id;
+
+            $query->where(function ($q) use ($streamId) {
+                $q->whereNull('stream_id')
+                    ->orWhere('stream_id', $streamId);
+            });
         }
 
         return $query
             ->orderBy('grade_id')
+            ->orderByRaw('stream_id IS NOT NULL')
             ->orderBy('stream_id')
             ->orderBy('name')
             ->get();
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(Request $request)
     {
         $validated = $request->validate([
+            'grade_id' => ['required', 'exists:grades,id'],
+            'stream_id' => ['nullable', 'exists:streams,id'],
             'name' => [
                 'required',
                 'string',
@@ -48,11 +46,15 @@ class SubjectController extends Controller
                 Rule::unique('subjects')->where(function ($query) use ($request) {
                     return $query
                         ->where('grade_id', $request->grade_id)
-                        ->where('stream_id', $request->stream_id);
+                        ->where(function ($q) use ($request) {
+                            if ($request->filled('stream_id')) {
+                                $q->where('stream_id', $request->stream_id);
+                            } else {
+                                $q->whereNull('stream_id');
+                            }
+                        });
                 }),
             ],
-            'grade_id' => ['required', 'exists:grades,id'],
-            'stream_id' => ['nullable', 'exists:streams,id'],
             'is_active' => ['nullable', 'boolean'],
         ], [
             'name.unique' => 'This subject already exists for the selected class and stream.',
@@ -61,6 +63,7 @@ class SubjectController extends Controller
             'stream_id.exists' => 'Selected stream is invalid.',
         ]);
 
+        $validated['stream_id'] = $validated['stream_id'] ?? null;
         $validated['is_active'] = $request->boolean('is_active', true);
 
         $subject = Subject::create($validated);
@@ -71,22 +74,18 @@ class SubjectController extends Controller
         );
     }
 
-    /**
-     * Display the specified resource.
-     */
     public function show(string $id)
     {
         return Subject::with(['grade', 'stream'])->findOrFail($id);
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
     public function update(Request $request, string $id)
     {
         $subject = Subject::findOrFail($id);
 
         $validated = $request->validate([
+            'grade_id' => ['required', 'exists:grades,id'],
+            'stream_id' => ['nullable', 'exists:streams,id'],
             'name' => [
                 'required',
                 'string',
@@ -94,11 +93,15 @@ class SubjectController extends Controller
                 Rule::unique('subjects')->ignore($subject->id)->where(function ($query) use ($request) {
                     return $query
                         ->where('grade_id', $request->grade_id)
-                        ->where('stream_id', $request->stream_id);
+                        ->where(function ($q) use ($request) {
+                            if ($request->filled('stream_id')) {
+                                $q->where('stream_id', $request->stream_id);
+                            } else {
+                                $q->whereNull('stream_id');
+                            }
+                        });
                 }),
             ],
-            'grade_id' => ['required', 'exists:grades,id'],
-            'stream_id' => ['nullable', 'exists:streams,id'],
             'is_active' => ['nullable', 'boolean'],
         ], [
             'name.unique' => 'This subject already exists for the selected class and stream.',
@@ -106,6 +109,8 @@ class SubjectController extends Controller
             'grade_id.exists' => 'Selected class is invalid.',
             'stream_id.exists' => 'Selected stream is invalid.',
         ]);
+
+        $validated['stream_id'] = $validated['stream_id'] ?? null;
 
         if ($request->has('is_active')) {
             $validated['is_active'] = $request->boolean('is_active');
@@ -118,9 +123,6 @@ class SubjectController extends Controller
         );
     }
 
-    /**
-     * Toggle active/inactive status.
-     */
     public function status(string $id)
     {
         $subject = Subject::findOrFail($id);
@@ -134,9 +136,6 @@ class SubjectController extends Controller
         );
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
     public function destroy(string $id)
     {
         Subject::findOrFail($id)->delete();

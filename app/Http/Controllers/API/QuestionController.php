@@ -11,6 +11,9 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use App\Imports\QuestionImport;
+use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class QuestionController extends Controller
 {
@@ -126,7 +129,13 @@ class QuestionController extends Controller
                 $allowed = auth()->user()->teacherAssignments()
                     ->where('grade_id', $data['grade_id'])
                     ->where('subject_id', $data['subject_id'])
-                    ->when($data['stream_id'] ?? null, fn ($q) => $q->where('stream_id', $data['stream_id']))
+                    ->where(function ($q) use ($data) {
+                        $q->whereNull('stream_id');
+
+                        if (!empty($data['stream_id'])) {
+                            $q->orWhere('stream_id', $data['stream_id']);
+                        }
+                    })
                     ->exists();
 
                 if (!$allowed) {
@@ -147,8 +156,14 @@ class QuestionController extends Controller
                         ->where('grade_id', $task->grade_id)
                         ->where('subject_id', $task->subject_id)
                         ->where('question_type_master_id', $task->question_type_master_id)
-                        ->when($task->stream_id, fn ($q) => $q->where('stream_id', $task->stream_id))
-                        ->when($task->lesson_id, fn ($q) => $q->where('lesson_id', $task->lesson_id))
+                        ->where(function ($q) use ($task) {
+                            $q->whereNull('stream_id');
+
+                            if ($task->stream_id) {
+                                $q->orWhere('stream_id', $task->stream_id);
+                            }
+                        })
+                        ->when($task->lesson_id, fn($q) => $q->where('lesson_id', $task->lesson_id))
                         ->count();
 
                     if ($createdCount >= $task->target_count) {
@@ -308,11 +323,78 @@ class QuestionController extends Controller
 
     public function import(Request $request)
     {
-        return response()->json(['message' => 'Question import needs V2 update.'], 501);
+        $request->validate([
+            'file' => ['required', 'file'],
+        ]);
+
+        $extension = strtolower($request->file('file')->getClientOriginalExtension());
+
+        if (!in_array($extension, ['xlsx', 'xls', 'csv'])) {
+            return response()->json([
+                'message' => 'Only Excel or CSV files are allowed.',
+                'errors' => [
+                    'file' => ['Only xlsx, xls, or csv files are allowed.'],
+                ],
+            ], 422);
+        }
+
+        $import = new QuestionImport(auth()->id());
+
+        Excel::import($import, $request->file('file'));
+
+        return response()->json([
+            'message' => 'Question import completed.',
+            'created' => $import->created,
+            'skipped' => $import->skipped,
+            'errors' => $import->errors,
+        ]);
     }
 
-    public function downloadTemplate()
+    public function downloadTemplate(): StreamedResponse
     {
-        return response()->json(['message' => 'Question import template needs V2 update.'], 501);
+        $rows = [
+            [
+                'Grade',
+                'Stream',
+                'Subject',
+                'Lesson',
+                'Question Type',
+                'Question',
+                'Difficulty',
+                'Bloom Level',
+                'Marks',
+                'Answer',
+                'Options',
+                'Correct Option',
+                'Match Pairs',
+            ],
+            [
+                'Grade 11',
+                'Science',
+                'English Core (301)',
+                'The Portrait of a Lady',
+                'mcq',
+                'Who is the author of The Portrait of a Lady?',
+                'medium',
+                'remember',
+                '1',
+                'Khushwant Singh',
+                'Khushwant Singh|William Wordsworth|A.R. Barton|Marga Minco',
+                'A',
+                '',
+            ],
+        ];
+
+        return response()->streamDownload(function () use ($rows) {
+            $handle = fopen('php://output', 'w');
+
+            foreach ($rows as $row) {
+                fputcsv($handle, $row);
+            }
+
+            fclose($handle);
+        }, 'question_import_template.csv', [
+            'Content-Type' => 'text/csv',
+        ]);
     }
 }

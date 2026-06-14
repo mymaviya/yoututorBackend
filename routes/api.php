@@ -65,24 +65,28 @@ Route::middleware('auth:sanctum')->group(function () {
 
         $roleSlug = $user->roleData?->slug ?? $user->role;
 
-        $permissionSlugs = $roleSlug === 'admin'
-            ? Permission::pluck('slug')
-            : ($user->roleData?->permissions->pluck('slug') ?? collect());
+        // Do not give admin all permissions automatically.
+        // Use only assigned role permissions.
+        $permissionSlugs = $user->roleData?->permissions->pluck('slug') ?? collect();
 
         $sidebarMenus = SidebarMenu::where('is_active', true)
             ->where('show_in_sidebar', true)
             ->orderBy('sort_order')
             ->get()
-            ->filter(function ($menu) use ($permissionSlugs) {
-                if (!$menu->permission_slug) {
+            ->filter(function ($menu) use ($permissionSlugs, $roleSlug) {
+                // Hide role-specific menu from other roles
+                if (!empty($menu->role_slug) && $menu->role_slug !== $roleSlug) {
+                    return false;
+                }
+
+                // Show public menu only when no permission is required
+                if (empty($menu->permission_slug)) {
                     return true;
                 }
 
                 return $permissionSlugs->contains($menu->permission_slug);
             })
             ->values();
-
-        $roleSlug = $user->roleData?->slug ?? $user->role;
 
         $dashboardRoute = match ($roleSlug) {
             'teacher' => 'teacher.dashboard',
@@ -125,6 +129,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
     Route::post('/notifications/mark-group-read', [NotificationController::class, 'markGroupRead']);
 
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/questions/import', [QuestionController::class, 'import']);
+        Route::get('/questions/import-template', [QuestionController::class, 'downloadTemplate']);
+
+        Route::post('/lessons/import', [LessonController::class, 'import']);
+        Route::get('/lessons/import-template', [LessonController::class, 'downloadTemplate']);
+    });
+
+
     Route::middleware('role:admin,teacher')->group(function () {
         Route::get('/grades', [GradeController::class, 'index']);
         Route::get('/subjects', [SubjectController::class, 'index']);
@@ -135,7 +148,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('question-papers', QuestionPaperController::class);
 
         Route::post('/papers/auto-generate', [QuestionPaperController::class, 'autoGenerate']);
-        Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generate']);
+        Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generateFromBlueprint']);
         Route::get('/question-papers/{id}/pdf', [QuestionPaperPdfController::class, 'download']);
 
         Route::post('/paper-generator/preview', [PaperGeneratorController::class, 'preview']);
@@ -212,10 +225,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::apiResource('grades', GradeController::class)->except(['index']);
         Route::apiResource('subjects', SubjectController::class)->except(['index']);
+
         Route::apiResource('lessons', LessonController::class)->except(['index']);
 
         Route::post('/grade_status/{id}', [GradeController::class, 'status']);
-        Route::post('/subject_status/{id}', [SubjectController::class, 'status']);
+        Route::post('/subjects/{id}/status', [SubjectController::class, 'status']);
 
         Route::apiResource('teacher-question-tasks', TeacherQuestionTaskController::class);
 
@@ -295,8 +309,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/blueprint-import/paper-blueprint', [BlueprintImportController::class, 'importPaperBlueprint']);
         Route::post('/blueprint-import/all', [BlueprintImportController::class, 'importAll']);
         Route::get('/blueprint-import/template', [BlueprintImportController::class, 'downloadTemplate']);
-
-
     });
 
 

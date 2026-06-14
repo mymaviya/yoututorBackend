@@ -11,6 +11,7 @@ class Lesson extends Model
         'stream_id',
         'subject_id',
         'name',
+        'genre',
         'is_active',
     ];
 

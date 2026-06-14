@@ -35,4 +35,9 @@ class QuestionTypeAssignment extends Model
     {
         return $this->belongsTo(Subject::class);
     }
+
+    public function questionType()
+    {
+        return $this->belongsTo(QuestionTypeMaster::class, 'question_type_master_id');
+    }
 }
