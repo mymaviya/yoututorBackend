@@ -31,9 +31,21 @@ class RoleSeeder extends Seeder
                 'name' => 'Principal',
                 'slug' => 'principal',
             ],
+            [
+                'name' => 'SuperAdmin',
+                'role_slug' => 'super_admin',
+            ],
         ];
 
         foreach ($roles as $role) {
+
+            Role::updateOrCreate(
+                ['slug' => 'super_admin'],
+                [
+                    'name' => 'SuperAdmin',
+                    'bypass_device_restriction' => true,
+                ]
+            );
 
             Role::updateOrCreate(
                 ['slug' => 'admin'],

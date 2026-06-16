@@ -15,6 +15,7 @@ class SidebarMenu extends Model
         'group_name',
         'parent_menu',
         'permission_slug',
+        'feature_key',
         'role_slug',
         'badge',
         'badge_color',

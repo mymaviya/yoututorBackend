@@ -25,6 +25,20 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => \App\Http\Middleware\PermissionMiddleware::class,
         ]);
     })
+    ->withMiddleware(function (Middleware $middleware) {
+        $middleware->alias([
+            'active.subscription' => \App\Http\Middleware\CheckActiveSubscription::class,
+        ]);
+    })
+    ->withMiddleware(function (Middleware $middleware) {
+        $middleware->alias([
+            'plan.feature' => \App\Http\Middleware\CheckPlanFeature::class,
+            'route.feature' => \App\Http\Middleware\CheckRouteFeature::class,
+        ]);
+    })
+    ->withCommands([
+        app_path('Console/Commands'),
+    ])
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();

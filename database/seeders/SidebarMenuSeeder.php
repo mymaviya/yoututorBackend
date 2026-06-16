@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\SidebarMenu;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Schema;
 
 class SidebarMenuSeeder extends Seeder
 {
@@ -611,14 +612,182 @@ class SidebarMenuSeeder extends Seeder
                 'is_active' => true,
                 'show_in_sidebar' => true,
             ],
+            [
+                'title' => 'Website Settings',
+                'route' => '/admin/settings',
+                'route_name' => 'admin.settings',
+                'icon' => 'mdi-cog',
+                'permission_slug' => 'settings.manages',
+                'parent_id' => null,
+                'group_name' => 'SaaS Management',
+                'sort_order' => 900,
+                'show_in_sidebar' => 1,
+                'badge' => null,
+                'badge_color' => null,
+                'is_active' => 1,
+            ],
+            [
+                'title' => 'Subscription Plans',
+                'route' => '/admin/subscription-plans',
+                'route_name' => 'admin.subscription.plans',
+                'icon' => 'mdi-package-variant',
+                'permission_slug' => 'subscription.plans.manage',
+                'parent_id' => null,
+                'group_name' => 'SaaS Management',
+                'sort_order' => 500,
+                'show_in_sidebar' => 1,
+                'badge' => null,
+                'badge_color' => null,
+                'is_active' => 1,
+            ],
+
+            [
+                'title' => 'Subscriptions',
+                'route' => '/admin/subscriptions',
+                'route_name' => 'admin.subscriptions',
+                'icon' => 'mdi-card-account-details',
+                'permission_slug' => 'subscriptions.view',
+                'parent_id' => null,
+                'group_name' => 'SaaS Management',
+                'sort_order' => 501,
+                'show_in_sidebar' => 1,
+                'badge' => null,
+                'badge_color' => null,
+                'is_active' => 1,
+            ],
+
+            [
+                'title' => 'Payment Transactions',
+                'route' => '/admin/payment-transactions',
+                'route_name' => 'admin.payment.transactions',
+                'icon' => 'mdi-cash-multiple',
+                'permission_slug' => 'payments.view',
+                'parent_id' => null,
+                'group_name' => 'SaaS Management',
+                'sort_order' => 502,
+                'show_in_sidebar' => 1,
+                'badge' => null,
+                'badge_color' => null,
+                'is_active' => 1,
+            ],
+
+            [
+                'title' => 'License Keys',
+                'route' => '/admin/license-keys',
+                'route_name' => 'admin.license.keys',
+                'icon' => 'mdi-key',
+                'permission_slug' => 'licenses.manage',
+                'parent_id' => null,
+                'group_name' => 'SaaS Management',
+                'sort_order' => 503,
+                'show_in_sidebar' => 1,
+                'badge' => null,
+                'badge_color' => null,
+                'is_active' => 1,
+            ],
+            [
+                'title' => 'SaaS Dashboard',
+                'route' => '/admin/saas-dashboard',
+                'route_name' => 'admin.saas.dashboard',
+                'icon' => 'mdi-view-dashboard-variant',
+                'permission_slug' => 'saas.dashboard',
+                'group_name' => 'SaaS Management',
+                'sort_order' => 498,
+                'show_in_sidebar' => 1,
+                'is_active' => 1,
+            ],
+            [
+                'title' => 'Create User',
+                'route' => '/users/create',
+                'route_name' => 'users.create',
+                'group_name' => 'Administration',
+                'permission_slug' => 'users.create',
+                'sort_order' => 59,
+                'show_in_sidebar' => 1,
+                'is_active' => 1,
+            ],
+            [
+                'title' => 'Demo Enquiries',
+                'route' => '/admin/demo-enquiries',
+                'route_name' => 'admin.demo.enquiries',
+                'permission_slug' => 'demo.enquiries.view',
+                'group_name' => 'SaaS Management',
+                'sort_order' => 499,
+                'show_in_sidebar' => 1,
+                'is_active' => 1,
+            ]
+
+
+
+        ];
+
+        $featureKeys = [
+            'streams.index' => 'academic_setup',
+            'grades.index' => 'academic_setup',
+            'subjects.index' => 'academic_setup',
+            'subject-templates' => 'academic_setup',
+            'lessons.index' => 'academic_setup',
+
+            'question.types' => 'question_bank',
+            'question-type-templates' => 'question_bank',
+            'questions.index' => 'question_bank',
+            'questions.create' => 'question_bank',
+            'language.questions.edit' => 'question_bank',
+
+            'question.approvals' => 'approval_workflow',
+
+            'papers.index' => 'manual_paper_creation',
+            'papers.creator' => 'manual_paper_creation',
+
+            'paper.blueprints' => 'blueprint_management',
+
+            'paper.generator' => 'auto_paper_generator',
+            'papers.generate' => 'auto_paper_generator',
+
+            'teachers.index' => 'teacher_management',
+
+            'teacher.tasks' => 'teacher_tasks',
+            'teacher.my.tasks' => 'teacher_tasks',
+
+            'exam.names' => 'exam_portion',
+            'exam.portions' => 'exam_portion',
+            'teacher.exam.portions' => 'exam_portion',
+
+            'teacher.progress' => 'basic_reports',
+
+            'teacher.analytics' => 'analytics',
+            'dashboard.analytics' => 'analytics',
+
+            'teachers.import' => 'import_export',
+            'lesson.import' => 'import_export',
+            'question.import' => 'import_export',
+            'blueprint.excel.import' => 'import_export',
+
+            'security.settings' => 'advanced_security',
+            'login.holidays' => 'advanced_security',
+            'user.devices' => 'advanced_security',
+            'audit.logs' => 'advanced_security',
+
+            'admin.saas.dashboard' => 'saas_management',
+            'admin.subscription.plans' => 'saas_management',
+            'admin.subscriptions' => 'saas_management',
+            'admin.payment.transactions' => 'saas_management',
+            'admin.license.keys' => 'saas_management',
+            'admin.settings' => 'saas_management',
         ];
 
         foreach ($menus as $menu) {
+            $payload = [];
+
+            foreach ($menu as $column => $value) {
+                if (Schema::hasColumn('sidebar_menus', $column)) {
+                    $payload[$column] = $value;
+                }
+            }
+
             SidebarMenu::updateOrCreate(
-                [
-                    'route_name' => $menu['route_name'],
-                ],
-                $menu
+                ['route_name' => $menu['route_name']],
+                $payload
             );
         }
     }
