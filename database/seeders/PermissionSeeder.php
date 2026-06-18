@@ -171,6 +171,18 @@ class PermissionSeeder extends Seeder
             ['name' => 'System Settings', 'slug' => 'system.settings', 'group_name' => 'System'],
             ['name' => 'Manage Backups', 'slug' => 'system.backups', 'group_name' => 'System'],
             ['name' => 'Manage Integrations', 'slug' => 'system.integrations', 'group_name' => 'System'],
+
+            ['name' => 'View Proposals', 'slug' => 'proposals.view', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Create Proposals', 'slug' => 'proposals.create', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Edit Proposals', 'slug' => 'proposals.edit', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Delete Proposals', 'slug' => 'proposals.delete', 'group_name' => 'CRM & Billing'],
+
+            ['name' => 'View Quotations', 'slug' => 'quotations.view', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Edit Quotations', 'slug' => 'quotations.edit', 'group_name' => 'CRM & Billing'],
+
+            ['name' => 'View Invoices', 'slug' => 'invoices.view', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Edit Invoices', 'slug' => 'invoices.edit', 'group_name' => 'CRM & Billing'],
+            
         ];
 
         foreach ($permissions as $permission) {

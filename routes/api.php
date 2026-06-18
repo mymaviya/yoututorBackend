@@ -57,6 +57,13 @@ use App\Http\Controllers\Api\Admin\PaymentTransactionController;
 use App\Http\Controllers\Api\Admin\LicenseKeyController;
 use App\Http\Controllers\Api\Public\RazorpayWebhookController;
 
+use App\Http\Controllers\Api\ProposalTemplateController;
+use App\Http\Controllers\Api\ProposalController;
+use App\Http\Controllers\Api\ServiceCatalogController;
+use App\Http\Controllers\Api\QuotationController;
+use App\Http\Controllers\Api\InvoiceController;
+use App\Http\Controllers\Api\CrmDashboardController;
+
 use App\Models\SidebarMenu;
 use App\Models\Stream;
 
@@ -225,6 +232,8 @@ Route::middleware(['auth:sanctum', 'role:admin, superadmin'])
         Route::put('/license-keys/{licenseKey}/extend', [LicenseKeyController::class, 'extend']);
         Route::post('/license-keys/{licenseKey}/regenerate', [LicenseKeyController::class, 'regenerate']);
 
+        Route::get('/crm/dashboard', [CrmDashboardController::class, 'index']);
+
         Route::get('/demo-enquiries', [AdminDemoEnquiryController::class, 'index']);
         Route::get('/demo-enquiries/{demoEnquiry}', [AdminDemoEnquiryController::class, 'show']);
         Route::put('/demo-enquiries/{demoEnquiry}/status', [AdminDemoEnquiryController::class, 'updateStatus']);
@@ -235,6 +244,48 @@ Route::middleware(['auth:sanctum', 'role:admin, superadmin'])
 
         Route::get('/settings', [SettingController::class, 'index']);
         Route::put('/settings', [SettingController::class, 'update']);
+
+        Route::get('/proposal-templates', [ProposalTemplateController::class, 'index']);
+        Route::get('/proposal-templates/{id}', [ProposalTemplateController::class, 'show']);
+        Route::post('/proposal-templates', [ProposalTemplateController::class, 'store']);
+        Route::put('/proposal-templates/{id}', [ProposalTemplateController::class, 'update']);
+        Route::delete('/proposal-templates/{id}', [ProposalTemplateController::class, 'destroy']);
+
+        Route::get('/proposals', [ProposalController::class, 'index']);
+        Route::post('/proposals', [ProposalController::class, 'store']);
+        Route::get('/proposals/{id}', [ProposalController::class, 'show']);
+        Route::put('/proposals/{id}', [ProposalController::class, 'update']);
+        Route::delete('/proposals/{id}', [ProposalController::class, 'destroy']);
+
+        Route::put('/proposals/{id}/sections', [ProposalController::class, 'updateSections']);
+        Route::put('/proposals/{id}/items', [ProposalController::class, 'updateItems']);
+        Route::get('/proposals/{id}/versions', [ProposalController::class, 'versions']);
+        Route::put('/proposals/{id}/send', [ProposalController::class, 'send']);
+        Route::put('/proposals/{id}/approve', [ProposalController::class, 'approve']);
+        Route::put('/proposals/{id}/reject', [ProposalController::class, 'reject']);
+        Route::put('/proposals/{id}/request-changes', [ProposalController::class, 'requestChanges']);
+        Route::post('/proposals/{id}/convert-to-quotation', [ProposalController::class, 'convertToQuotation']);
+        Route::get('/proposals/{id}/pdf', [ProposalController::class, 'generatePdf']);
+
+        Route::get('/service-catalogs', [ServiceCatalogController::class, 'index']);
+        Route::get('/service-catalogs/{id}', [ServiceCatalogController::class, 'show']);
+
+        Route::get('/quotations', [QuotationController::class, 'index']);
+        Route::get('/quotations/{id}', [QuotationController::class, 'show']);
+        Route::put('/quotations/{id}', [QuotationController::class, 'update']);
+        Route::put('/quotations/{id}/send', [QuotationController::class, 'send']);
+        Route::put('/quotations/{id}/accept', [QuotationController::class, 'accept']);
+        Route::put('/quotations/{id}/reject', [QuotationController::class, 'reject']);
+        Route::post('/quotations/{id}/convert-to-invoice', [QuotationController::class, 'convertToInvoice']);
+        Route::get('/quotations/{id}/pdf', [QuotationController::class, 'generatePdf']);
+
+        Route::get('/invoices', [InvoiceController::class, 'index']);
+        Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
+        Route::put('/invoices/{id}', [InvoiceController::class, 'update']);
+        Route::put('/invoices/{id}/send', [InvoiceController::class, 'send']);
+        Route::put('/invoices/{id}/mark-paid', [InvoiceController::class, 'markPaid']);
+        Route::put('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
+        Route::get('/invoices/{id}/pdf', [InvoiceController::class, 'generatePdf']);
     });
 
 /*
@@ -267,6 +318,9 @@ Route::middleware([
         Route::get('/subjects', [SubjectController::class, 'index'])->name('subjects.index');
         Route::get('/lessons', [LessonController::class, 'index'])->name('lessons.index');
         Route::get('/question-types', [QuestionTypeController::class, 'index'])->name('question.types');
+
+        Route::get('/questions/import-template', [QuestionController::class, 'downloadTemplate']);
+        Route::post('/questions/import', [QuestionController::class, 'import']);
 
         Route::apiResource('questions', QuestionController::class)->names([
             'index' => 'questions.index',
@@ -362,9 +416,7 @@ Route::middleware([
 
         Route::get('/dashboard', [DashboardController::class, 'index']);
 
-        Route::post('/questions/import', [QuestionController::class, 'import']);
-        Route::get('/questions/import-template', [QuestionController::class, 'downloadTemplate']);
-
+     
         Route::post('/lessons/import', [LessonController::class, 'import']);
         Route::get('/lessons/import-template', [LessonController::class, 'downloadTemplate']);
 
