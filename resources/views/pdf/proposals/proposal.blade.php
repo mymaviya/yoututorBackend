@@ -273,6 +273,9 @@ $letterheadData = file_exists($letterheadPath)
                     <td>Grand Total</td>
                     <td class="text-right">Rs. {{ number_format($proposal->grand_total, 2) }}</td>
                 </tr>
+                <tr class="grand">
+                    <td colspan="2">{{ amountToWords($proposal->grand_total) }}</td>
+                </tr>
             </table>
         </div>
         @endif

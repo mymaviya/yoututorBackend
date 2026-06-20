@@ -357,6 +357,9 @@ table {
                 <td>Amount Due</td>
                 <td class="text-right">Rs. {{ number_format($invoice->balance_amount, 2) }}</td>
             </tr>
+            <tr class="grand">
+                <td colspan="2">Paid: {{  amountToWords($invoice->paid_amount) }}</td>
+            </tr>
         </table>
     </div>
 
