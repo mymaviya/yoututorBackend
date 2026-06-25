@@ -16,6 +16,10 @@ class TeachersImport implements ToCollection
     public array $errors = [];
     public array $credentials = [];
 
+    public function __construct(
+        private readonly ?int $subscriptionId = null
+    ) {}
+
     public function collection(Collection $rows)
     {
         $teacherRole = Role::where('slug', 'teacher')->first();
@@ -31,7 +35,6 @@ class TeachersImport implements ToCollection
             $name = trim((string) ($row[0] ?? ''));
             $email = strtolower(trim((string) ($row[1] ?? '')));
             $mobile = trim((string) ($row[2] ?? ''));
-            // $qualification = trim((string) ($row[3] ?? '')); // V2 has no teachers table.
             $address = trim((string) ($row[4] ?? ''));
 
             if (!$name || !$email || !$mobile) {
@@ -52,9 +55,24 @@ class TeachersImport implements ToCollection
                 continue;
             }
 
+            if ($this->subscriptionId) {
+                $subscription = \App\Models\Subscription::find($this->subscriptionId);
+
+                if ($subscription && $subscription->max_users) {
+                    $currentUsers = User::where('subscription_id', $this->subscriptionId)->count();
+
+                    if ($currentUsers >= $subscription->max_users) {
+                        $this->skipped++;
+                        $this->errors[] = "Row {$rowNumber}: User limit reached for this subscription.";
+                        continue;
+                    }
+                }
+            }
+
             $passwordPlain = $this->generatePassword($name, $mobile);
 
             User::create([
+                'subscription_id' => $this->subscriptionId,
                 'name' => $name,
                 'email' => $email,
                 'contact' => $mobile,

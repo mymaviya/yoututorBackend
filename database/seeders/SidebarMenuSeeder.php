@@ -808,61 +808,148 @@ class SidebarMenuSeeder extends Seeder
         ];
 
         $featureKeys = [
+            // Academic
             'streams.index' => 'academic_setup',
             'grades.index' => 'academic_setup',
+            'grades.status' => 'academic_setup',
             'subjects.index' => 'academic_setup',
+            'subjects.status' => 'academic_setup',
             'subject-templates' => 'academic_setup',
+            'subject-templates.apply' => 'academic_setup',
             'lessons.index' => 'academic_setup',
 
+            // Question Bank
             'question.types' => 'question_bank',
             'question-type-templates' => 'question_bank',
+            'question-type-templates.apply' => 'question_bank',
             'questions.index' => 'question_bank',
             'questions.create' => 'question_bank',
+            'questions.show' => 'question_bank',
+            'questions.edit' => 'question_bank',
+            'questions.delete' => 'question_bank',
             'language.questions.edit' => 'question_bank',
+            'language.questions.group' => 'question_bank',
 
+            // Approval Workflow
             'question.approvals' => 'approval_workflow',
+            'question.approvals.approve' => 'approval_workflow',
+            'question.approvals.reject' => 'approval_workflow',
 
+            // Manual Paper Creation
             'papers.index' => 'manual_paper_creation',
+            'papers.create' => 'manual_paper_creation',
             'papers.creator' => 'manual_paper_creation',
+            'paper.edit' => 'manual_paper_creation',
+            'papers.delete' => 'manual_paper_creation',
+            'question.paper.view' => 'manual_paper_creation',
+            'question-papers.pdf' => 'manual_paper_creation',
+            'question-papers.finalize' => 'manual_paper_creation',
+            'question-papers.reopen' => 'manual_paper_creation',
+            'question-papers.printed' => 'manual_paper_creation',
+            'question-papers.archive' => 'manual_paper_creation',
 
+            // Blueprint Management
             'paper.blueprints' => 'blueprint_management',
+            'paper.blueprints.dropdown' => 'blueprint_management',
+            'paper.blueprints.status' => 'blueprint_management',
+            'paper.blueprints.copy' => 'blueprint_management',
 
+            // Auto Paper Generator
             'paper.generator' => 'auto_paper_generator',
+            'paper.generator.preview' => 'auto_paper_generator',
+            'paper.generator.generate' => 'auto_paper_generator',
+            'papers.auto-generate' => 'auto_paper_generator',
+            'papers.generate-from-blueprint' => 'auto_paper_generator',
             'papers.generate' => 'auto_paper_generator',
 
+            // Teacher Management
             'teachers.index' => 'teacher_management',
+            'teachers.create' => 'teacher_management',
+            'teachers.show' => 'teacher_management',
+            'teachers.update' => 'teacher_management',
+            'teachers.destroy' => 'teacher_management',
+            'users.index' => 'teacher_management',
+            'users.create' => 'teacher_management',
+            'users.permissions' => 'teacher_management',
+            'users.permissions.sync' => 'teacher_management',
+            'users.bulk-login-access' => 'teacher_management',
 
+            // Teacher Tasks
             'teacher.tasks' => 'teacher_tasks',
             'teacher.my.tasks' => 'teacher_tasks',
 
+            // Exam Portion
             'exam.names' => 'exam_portion',
+            'exam-names.status' => 'exam_portion',
             'exam.portions' => 'exam_portion',
+            'exam-portions.submit' => 'exam_portion',
+            'exam-portions.approve' => 'exam_portion',
+            'exam-portions.reject' => 'exam_portion',
             'teacher.exam.portions' => 'exam_portion',
 
+            // Reports / Analytics
             'teacher.progress' => 'basic_reports',
-
             'teacher.analytics' => 'analytics',
             'dashboard.analytics' => 'analytics',
 
+            // Imports / Exports
             'teachers.import' => 'import_export',
+            'teachers.import.preview' => 'import_export',
+            'teachers.import.template' => 'import_export',
             'lesson.import' => 'import_export',
+            'lesson.import.template' => 'import_export',
             'question.import' => 'import_export',
+            'question.import.template' => 'import_export',
+            'question-types.import' => 'import_export',
             'blueprint.excel.import' => 'import_export',
+            'blueprint.import.question-type-template' => 'import_export',
+            'blueprint.import.paper-blueprint' => 'import_export',
+            'blueprint.import.all' => 'import_export',
+            'blueprint.excel' => 'import_export',
 
+            // Security
             'security.settings' => 'advanced_security',
             'login.holidays' => 'advanced_security',
             'user.devices' => 'advanced_security',
+            'user-devices.index' => 'advanced_security',
+            'user-devices.trust' => 'advanced_security',
+            'user-devices.block' => 'advanced_security',
+            'user-devices.destroy' => 'advanced_security',
             'audit.logs' => 'advanced_security',
 
+            // SaaS Management
             'admin.saas.dashboard' => 'saas_management',
             'admin.subscription.plans' => 'saas_management',
             'admin.subscriptions' => 'saas_management',
             'admin.payment.transactions' => 'saas_management',
             'admin.license.keys' => 'saas_management',
             'admin.settings' => 'saas_management',
+            'admin.demo.enquiries' => 'saas_management',
+
+            // CRM & Billing
+            'admin.crm.dashboard' => 'crm',
+            'admin.proposals' => 'crm',
+            'admin.proposals.create' => 'crm',
+            'admin.proposals.edit' => 'crm',
+            'admin.proposals.preview' => 'crm',
+            'admin.proposal.templates' => 'crm',
+            'admin.proposal.templates.create' => 'crm',
+            'admin.proposal.templates.edit' => 'crm',
+            'admin.quotations' => 'crm',
+            'admin.quotations.edit' => 'crm',
+            'admin.invoices' => 'crm',
+            'admin.invoices.edit' => 'crm',
         ];
 
         foreach ($menus as $menu) {
+            $routeName = $menu['route_name'];
+
+            if (array_key_exists($routeName, $featureKeys)) {
+                $menu['feature_key'] = $featureKeys[$routeName];
+            } elseif (! array_key_exists('feature_key', $menu)) {
+                $menu['feature_key'] = null;
+            }
+
             $payload = [];
 
             foreach ($menu as $column => $value) {
@@ -872,8 +959,42 @@ class SidebarMenuSeeder extends Seeder
             }
 
             SidebarMenu::updateOrCreate(
-                ['route_name' => $menu['route_name']],
+                ['route_name' => $routeName],
                 $payload
+            );
+        }
+
+        $existingRouteNames = collect($menus)
+            ->pluck('route_name')
+            ->filter()
+            ->all();
+
+        foreach ($featureKeys as $routeName => $featureKey) {
+            if (in_array($routeName, $existingRouteNames, true)) {
+                continue;
+            }
+
+            $payload = [
+                'title' => str($routeName)->replace(['.', '-'], ' ')->title()->toString(),
+                'route_name' => $routeName,
+                'feature_key' => $featureKey,
+                'permission_slug' => null,
+                'role_slug' => null,
+                'is_active' => true,
+                'show_in_sidebar' => false,
+            ];
+
+            $safePayload = [];
+
+            foreach ($payload as $column => $value) {
+                if (Schema::hasColumn('sidebar_menus', $column)) {
+                    $safePayload[$column] = $value;
+                }
+            }
+
+            SidebarMenu::updateOrCreate(
+                ['route_name' => $routeName],
+                $safePayload
             );
         }
     }

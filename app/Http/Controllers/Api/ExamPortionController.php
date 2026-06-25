@@ -5,10 +5,58 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\ExamPortion;
 use App\Models\Lesson;
+use App\Models\User;
 use Illuminate\Http\Request;
 
 class ExamPortionController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $user = auth()->user();
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function tenantId(): ?int
+    {
+        return auth()->user()?->subscription_id;
+    }
+
+    private function ensurePortionAccess(ExamPortion $portion)
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        if ((int) $portion->subscription_id !== (int) $this->tenantId()) {
+            return response()->json([
+                'message' => 'You are not allowed to access this exam portion.',
+            ], 403);
+        }
+
+        return null;
+    }
+
+    private function ensureTeacherBelongsToTenant(int $teacherId)
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        $exists = User::where('id', $teacherId)
+            ->where('subscription_id', $this->tenantId())
+            ->exists();
+
+        if (! $exists) {
+            return response()->json([
+                'message' => 'Selected teacher does not belong to your subscription.',
+            ], 422);
+        }
+
+        return null;
+    }
+
     public function index(Request $request)
     {
         $query = ExamPortion::with([
@@ -20,6 +68,10 @@ class ExamPortionController extends Controller
             'assignedBy',
             'approvedBy',
         ])->latest();
+
+        if (! $this->isSuperAdmin()) {
+            $query->where('subscription_id', $this->tenantId());
+        }
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -51,12 +103,16 @@ class ExamPortionController extends Controller
             'due_date' => 'nullable|date',
         ]);
 
+        if ($response = $this->ensureTeacherBelongsToTenant((int) $data['teacher_id'])) {
+            return $response;
+        }
+
         $created = [];
         $duplicates = [];
 
         foreach ($data['exam_name_ids'] as $examNameId) {
-
-            $exists = ExamPortion::where('grade_id', $data['grade_id'])
+            $exists = ExamPortion::where('subscription_id', $this->tenantId())
+                ->where('grade_id', $data['grade_id'])
                 ->where('subject_id', $data['subject_id'])
                 ->where('exam_name_id', $examNameId)
                 ->exists();
@@ -66,19 +122,19 @@ class ExamPortionController extends Controller
             }
         }
 
-        if (!empty($duplicates)) {
-
+        if (! empty($duplicates)) {
             $examNames = \App\Models\ExamName::whereIn('id', $duplicates)
                 ->pluck('name')
                 ->implode(', ');
 
             return response()->json([
                 'message' => 'Portion already exists for: ' . $examNames,
-            ], 500);
+            ], 422);
         }
 
         foreach ($data['exam_name_ids'] as $examNameId) {
             $portion = ExamPortion::create([
+                'subscription_id' => $this->tenantId(),
                 'teacher_id' => $data['teacher_id'],
                 'grade_id' => $data['grade_id'],
                 'subject_id' => $data['subject_id'],
@@ -119,12 +175,20 @@ class ExamPortionController extends Controller
             'approvedBy',
         ])->findOrFail($id);
 
+        if ($response = $this->ensurePortionAccess($portion)) {
+            return $response;
+        }
+
         return response()->json($portion);
     }
 
     public function update(Request $request, $id)
     {
         $portion = ExamPortion::findOrFail($id);
+
+        if ($response = $this->ensurePortionAccess($portion)) {
+            return $response;
+        }
 
         $data = $request->validate([
             'teacher_id' => 'required|exists:users,id',
@@ -135,7 +199,12 @@ class ExamPortionController extends Controller
             'due_date' => 'nullable|date',
         ]);
 
-        $exists = ExamPortion::where('grade_id', $data['grade_id'])
+        if ($response = $this->ensureTeacherBelongsToTenant((int) $data['teacher_id'])) {
+            return $response;
+        }
+
+        $exists = ExamPortion::where('subscription_id', $portion->subscription_id)
+            ->where('grade_id', $data['grade_id'])
             ->where('subject_id', $data['subject_id'])
             ->where('exam_name_id', $data['exam_name_ids'][0])
             ->where('id', '!=', $portion->id)
@@ -143,8 +212,8 @@ class ExamPortionController extends Controller
 
         if ($exists) {
             return response()->json([
-                'message' => 'This Grade, Subject and Exam combination already exists.'
-            ], 500);
+                'message' => 'This Grade, Subject and Exam combination already exists.',
+            ], 422);
         }
 
         $portion->update([
@@ -163,7 +232,13 @@ class ExamPortionController extends Controller
 
     public function destroy($id)
     {
-        ExamPortion::findOrFail($id)->delete();
+        $portion = ExamPortion::findOrFail($id);
+
+        if ($response = $this->ensurePortionAccess($portion)) {
+            return $response;
+        }
+
+        $portion->delete();
 
         return response()->json([
             'message' => 'Exam portion deleted successfully',
@@ -174,7 +249,7 @@ class ExamPortionController extends Controller
     {
         $teacher = auth()->user();
 
-        if (!$teacher) {
+        if (! $teacher) {
             return response()->json([
                 'message' => 'Teacher profile not found.',
             ], 404);
@@ -188,6 +263,7 @@ class ExamPortionController extends Controller
             'assignedBy',
             'approvedBy',
         ])
+            ->where('subscription_id', $teacher->subscription_id)
             ->where('teacher_id', $teacher->id)
             ->latest()
             ->get();
@@ -197,9 +273,13 @@ class ExamPortionController extends Controller
     {
         $teacher = auth()->user();
 
+        if ($response = $this->ensurePortionAccess($examPortion)) {
+            return $response;
+        }
+
         if (
-            auth()->user()->role === 'teacher' &&
-            (!$teacher || $examPortion->teacher_id !== $teacher->id)
+            $teacher?->role === 'teacher' &&
+            (! $teacher || (int) $examPortion->teacher_id !== (int) $teacher->id)
         ) {
             return response()->json([
                 'message' => 'Unauthorized.',
@@ -218,23 +298,26 @@ class ExamPortionController extends Controller
         $examPortion->lessons()->delete();
 
         foreach ($data['lessons'] as $lesson) {
-
             if (empty($lesson['lesson_id']) && empty($lesson['lesson_title'])) {
                 return response()->json([
-                    'message' => 'Please select a lesson or enter a new lesson name.'
+                    'message' => 'Please select a lesson or enter a new lesson name.',
                 ], 422);
             }
 
             $lessonId = $lesson['lesson_id'] ?? null;
 
-            if (!$lessonId && !empty($lesson['lesson_title'])) {
+            if (! $lessonId && ! empty($lesson['lesson_title'])) {
                 $newLesson = Lesson::firstOrCreate(
                     [
+                        'subscription_id' => $examPortion->subscription_id,
                         'subject_id' => $examPortion->subject_id,
-                        'title' => $lesson['lesson_title'],
+                        'name' => $lesson['lesson_title'],
                     ],
                     [
-                        'is_active' => 1,
+                        'grade_id' => $examPortion->grade_id,
+                        'stream_id' => $examPortion->stream_id ?? null,
+                        'genre' => null,
+                        'is_active' => true,
                     ]
                 );
 
@@ -280,6 +363,10 @@ class ExamPortionController extends Controller
 
     public function approve(ExamPortion $examPortion)
     {
+        if ($response = $this->ensurePortionAccess($examPortion)) {
+            return $response;
+        }
+
         $examPortion->update([
             'status' => 'approved',
             'approved_by' => auth()->id(),
@@ -303,6 +390,10 @@ class ExamPortionController extends Controller
 
     public function reject(Request $request, ExamPortion $examPortion)
     {
+        if ($response = $this->ensurePortionAccess($examPortion)) {
+            return $response;
+        }
+
         $data = $request->validate([
             'rejection_reason' => 'required|string|max:1000',
         ]);

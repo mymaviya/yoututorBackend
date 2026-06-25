@@ -9,12 +9,42 @@ use Illuminate\Http\Request;
 use App\Imports\LessonImport;
 use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Support\Facades\Schema;
 
 class LessonController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $user = auth()->user();
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function applyTenantScope($query, string $table)
+    {
+        if (! $this->isSuperAdmin() && Schema::hasColumn($table, 'subscription_id')) {
+            $query->where($table . '.subscription_id', auth()->user()?->subscription_id);
+        }
+
+        return $query;
+    }
+
+    private function addTenantId(array $data, string $table): array
+    {
+        if (Schema::hasColumn($table, 'subscription_id')) {
+            $data['subscription_id'] = auth()->user()?->subscription_id;
+        }
+
+        return $data;
+    }
+
     public function index(Request $request)
     {
-        $query = Lesson::with(['subject', 'subject.grade', 'subject.stream']);
+        $query = $this->applyTenantScope(
+            Lesson::with(['subject', 'subject.grade', 'subject.stream']),
+            'lessons'
+        );
 
         if ($request->filled('subject_id')) {
             $query->where('subject_id', $request->subject_id);
@@ -49,7 +79,7 @@ class LessonController extends Controller
             'is_active' => 'nullable|boolean',
         ]);
 
-        $subject = Subject::where('id', $data['subject_id'])
+        $subject = $this->applyTenantScope(Subject::where('id', $data['subject_id']), 'subjects')
             ->where('grade_id', $data['grade_id'])
             ->first();
 
@@ -65,7 +95,7 @@ class LessonController extends Controller
         $data['stream_id'] = $subject->stream_id ?? ($data['stream_id'] ?? null);
         $data['is_active'] = $request->boolean('is_active', true);
 
-        $exists = Lesson::where('subject_id', $data['subject_id'])
+        $exists = $this->applyTenantScope(Lesson::where('subject_id', $data['subject_id']), 'lessons')
             ->whereRaw('LOWER(name) = ?', [strtolower($data['name'])])
             ->exists();
 
@@ -78,7 +108,7 @@ class LessonController extends Controller
             ], 422);
         }
 
-        $lesson = Lesson::create($data);
+        $lesson = Lesson::create($this->addTenantId($data, 'lessons'));
 
         return response()->json(
             $lesson->load(['subject', 'subject.grade', 'subject.stream']),
@@ -88,12 +118,15 @@ class LessonController extends Controller
 
     public function show(string $id)
     {
-        return Lesson::with(['subject', 'subject.grade', 'subject.stream'])->findOrFail($id);
+        return $this->applyTenantScope(
+            Lesson::with(['subject', 'subject.grade', 'subject.stream']),
+            'lessons'
+        )->findOrFail($id);
     }
 
     public function update(Request $request, string $id)
     {
-        $lesson = Lesson::findOrFail($id);
+        $lesson = $this->applyTenantScope(Lesson::query(), 'lessons')->findOrFail($id);
 
         $data = $request->validate([
             'grade_id' => 'required|exists:grades,id',
@@ -104,7 +137,7 @@ class LessonController extends Controller
             'is_active' => 'nullable|boolean',
         ]);
 
-        $subject = Subject::where('id', $data['subject_id'])
+        $subject = $this->applyTenantScope(Subject::where('id', $data['subject_id']), 'subjects')
             ->where('grade_id', $data['grade_id'])
             ->first();
 
@@ -123,7 +156,7 @@ class LessonController extends Controller
             $data['is_active'] = $request->boolean('is_active');
         }
 
-        $exists = Lesson::where('subject_id', $data['subject_id'])
+        $exists = $this->applyTenantScope(Lesson::where('subject_id', $data['subject_id']), 'lessons')
             ->whereRaw('LOWER(name) = ?', [strtolower($data['name'])])
             ->where('id', '!=', $lesson->id)
             ->exists();
@@ -137,7 +170,7 @@ class LessonController extends Controller
             ], 422);
         }
 
-        $lesson->update($data);
+        $lesson->update($this->addTenantId($data, 'lessons'));
 
         return response()->json(
             $lesson->fresh()->load(['subject', 'subject.grade', 'subject.stream'])
@@ -146,7 +179,7 @@ class LessonController extends Controller
 
     public function destroy(string $id)
     {
-        Lesson::findOrFail($id)->delete();
+        $this->applyTenantScope(Lesson::query(), 'lessons')->findOrFail($id)->delete();
 
         return response()->json([
             'message' => 'Deleted',

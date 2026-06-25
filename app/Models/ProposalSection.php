@@ -2,12 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class ProposalSection extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
-        'proposal_id',
+        
+        'subscription_id','proposal_id',
         'title',
         'section_key',
         'content',
@@ -29,4 +33,10 @@ class ProposalSection extends Model
         return $this->hasMany(ProposalSection::class)
             ->orderBy('sort_order');
     }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
 }

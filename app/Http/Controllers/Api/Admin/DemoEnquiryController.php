@@ -166,6 +166,7 @@ class DemoEnquiryController extends Controller
                 'subscription_plan_id' => $plan->id,
                 'demo_enquiry_id' => $demoEnquiry->id,
                 'school_name' => $demoEnquiry->school_name,
+                'school_code' => 'SCH-' . strtoupper(Str::random(6)),
                 'contact_person' => $demoEnquiry->contact_person,
                 'mobile' => $demoEnquiry->mobile,
                 'email' => $demoEnquiry->email,
@@ -175,6 +176,7 @@ class DemoEnquiryController extends Controller
                 'ends_at' => $endsAt->toDateString(),
                 'is_trial' => $plan->is_trial,
                 'auto_renew' => false,
+                'max_users' => $plan->max_users ?? null,
             ]);
 
             $licenseKey = LicenseKey::create([
@@ -200,10 +202,10 @@ class DemoEnquiryController extends Controller
                 'remark' => "Converted to {$plan->name} subscription.",
             ]);
 
-            if ($subscription->email) {
-                Mail::to($subscription->email)
-                    ->queue(new TrialStartedMail($subscription->load(['plan', 'licenseKey'])));
-            }
+            // if ($subscription->email) {
+            //     Mail::to($subscription->email)
+            //         ->queue(new TrialStartedMail($subscription->load(['plan', 'licenseKey'])));
+            // }
 
             return response()->json([
                 'success' => true,
@@ -219,7 +221,8 @@ class DemoEnquiryController extends Controller
 
     private function createSchoolAdminUser(Subscription $subscription): User
     {
-        $plainPassword = Str::random(10);
+        // $plainPassword = Str::random(10);
+        $plainPassword = 123456;
 
         $schoolAdminRole = Role::whereIn('slug', [
             'school_admin',
@@ -229,6 +232,7 @@ class DemoEnquiryController extends Controller
         $user = User::updateOrCreate(
             ['email' => $subscription->email],
             [
+                'subscription_id' => $subscription->id,
                 'name' => $subscription->contact_person ?: $subscription->school_name,
                 'contact' => $subscription->mobile,
                 'role' => $schoolAdminRole?->slug ?? 'admin',
@@ -237,13 +241,14 @@ class DemoEnquiryController extends Controller
                 'login_enabled' => true,
                 'is_active' => true,
                 'password_change_required' => true,
+                'login_start_date' => now()->toDateString(),
             ]
         );
 
-        if ($subscription->email) {
-            Mail::to($subscription->email)
-                ->send(new SaaSLoginCredentialsMail($user, $subscription->load('plan'), $plainPassword));
-        }
+        // if ($subscription->email) {
+        //     Mail::to($subscription->email)
+        //         ->send(new SaaSLoginCredentialsMail($user, $subscription->load('plan'), $plainPassword));
+        // }
 
         return $user;
     }

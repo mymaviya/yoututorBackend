@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class PaperBlueprint extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
+        'subscription_id',
         'grade_id',
         'stream_id',
         'subject_id',
@@ -46,4 +50,9 @@ class PaperBlueprint extends Model
     {
         return $this->hasMany(PaperBlueprintSection::class)->orderBy('sort_order');
     }
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
 }

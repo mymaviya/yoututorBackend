@@ -8,23 +8,26 @@ use Symfony\Component\HttpFoundation\Response;
 
 class SessionTimeoutMiddleware
 {
-    public function handle($request, Closure $next)
+    public function handle(Request $request, Closure $next): Response
     {
-        $user = auth()->user();
+        $user = $request->user();
 
-        if (!$user) {
+        if (! $user) {
             return $next($request);
         }
 
         $lastActivity = session('last_activity_time');
+        $timeout = (int) ($user->session_timeout_minutes ?? 30);
 
-        $timeout = $user->session_timeout_minutes ?? 30;
+        if ($timeout <= 0) {
+            $timeout = 30;
+        }
 
         if ($lastActivity && now()->diffInMinutes($lastActivity) > $timeout) {
-            auth()->user()->currentAccessToken()?->delete();
+            $user->currentAccessToken()?->delete();
 
             return response()->json([
-                'message' => 'Session expired due to inactivity.'
+                'message' => 'Session expired due to inactivity.',
             ], 401);
         }
 

@@ -7,6 +7,7 @@ use App\Models\Subject;
 use App\Models\Stream;
 use App\Models\QuestionTypeMaster;
 use App\Models\QuestionTypeAssignment;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Illuminate\Support\Collection;
@@ -79,12 +80,12 @@ class QuestionTypesImport implements ToCollection
             );
 
             $assignment = QuestionTypeAssignment::firstOrCreate(
-                [
+                array_merge($this->subscriptionPayload('question_type_assignments'), [
                     'question_type_master_id' => $master->id,
                     'grade_id' => $grade->id,
                     'stream_id' => $streamId,
                     'subject_id' => $subject->id,
-                ],
+                ]),
                 [
                     'is_active' => true,
                 ]
@@ -97,6 +98,18 @@ class QuestionTypesImport implements ToCollection
                 $this->errors[] = "Row {$rowNumber}: Already assigned - {$typeName} for {$gradeName} / {$subjectName}.";
             }
         }
+    }
+
+
+    private function subscriptionPayload(string $table): array
+    {
+        if (!auth()->check() || !Schema::hasColumn($table, 'subscription_id')) {
+            return [];
+        }
+
+        return [
+            'subscription_id' => auth()->user()->subscription_id,
+        ];
     }
 
     private function findSubject(int $gradeId, ?int $streamId, string $subjectName): ?Subject

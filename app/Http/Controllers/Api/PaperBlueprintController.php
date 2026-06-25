@@ -80,6 +80,14 @@ class PaperBlueprintController extends Controller
     {
         $query = PaperBlueprint::with($this->relationships())->latest();
 
+        $user = auth()->user();
+        $userRole = $user->roleData?->slug ?? $user->role;
+
+        if (!in_array($userRole, ['superadmin', 'super_admin'])) {
+            $query->where('subscription_id', $user->subscription_id);
+        }
+
+
         if ($request->filled('grade_id')) {
             $query->where('grade_id', $request->grade_id);
         }
@@ -129,6 +137,7 @@ class PaperBlueprintController extends Controller
             'sections.*.items.*.question_count' => 'required|integer|min:1',
             'sections.*.items.*.marks_per_question' => 'required|numeric|min:0',
 
+            'use_bloom_levels' => 'nullable|boolean',
             'bloom_levels' => 'nullable|array',
             'bloom_levels.*.bloom_level' => 'required_with:bloom_levels|in:remember,understand,apply,analyze,evaluate,create',
             'bloom_levels.*.percentage' => 'required_with:bloom_levels|numeric|min:0|max:100',
@@ -136,6 +145,7 @@ class PaperBlueprintController extends Controller
 
         return DB::transaction(function () use ($data) {
             $blueprint = PaperBlueprint::create([
+                'subscription_id' => auth()->user()?->subscription_id,
                 'name' => $data['name'],
                 'grade_id' => $data['grade_id'],
                 'stream_id' => $data['stream_id'] ?? null,
@@ -213,16 +223,24 @@ class PaperBlueprintController extends Controller
 
     public function show($id)
     {
+        $blueprint = PaperBlueprint::with($this->relationships())->findOrFail($id);
+
+        if ($response = $this->ensureBlueprintAccess($blueprint)) {
+            return $response;
+        }
+
         return response()->json(
-            $this->formatBlueprint(
-                PaperBlueprint::with($this->relationships())->findOrFail($id)
-            )
+            $this->formatBlueprint($blueprint)
         );
     }
 
     public function update(Request $request, $id)
     {
         $blueprint = PaperBlueprint::findOrFail($id);
+
+        if ($response = $this->ensureBlueprintAccess($blueprint)) {
+            return $response;
+        }
 
         $data = $request->validate([
             'name' => 'nullable|string|max:255',
@@ -339,7 +357,13 @@ class PaperBlueprintController extends Controller
 
     public function destroy($id)
     {
-        PaperBlueprint::findOrFail($id)->delete();
+        $blueprint = PaperBlueprint::findOrFail($id);
+
+        if ($response = $this->ensureBlueprintAccess($blueprint)) {
+            return $response;
+        }
+
+        $blueprint->delete();
 
         return response()->json([
             'message' => 'Paper blueprint deleted successfully',
@@ -349,6 +373,10 @@ class PaperBlueprintController extends Controller
     public function status($id)
     {
         $blueprint = PaperBlueprint::findOrFail($id);
+
+        if ($response = $this->ensureBlueprintAccess($blueprint)) {
+            return $response;
+        }
 
         $blueprint->update([
             'is_active' => !$blueprint->is_active,
@@ -367,13 +395,23 @@ class PaperBlueprintController extends Controller
 
     private function availableQuestionCount($blueprint, $section): int
     {
-        return Question::where('status', 'approved')
-            ->where('grade_id', $blueprint->grade_id)
+        $query = Question::where('status', 'approved');
+
+        $user = auth()->user();
+        $userRole = $user->roleData?->slug ?? $user->role;
+
+        if (!in_array($userRole, ['superadmin', 'super_admin'])) {
+            $query->where('subscription_id', $user->subscription_id);
+        }
+
+        return $query->where('grade_id', $blueprint->grade_id)
             ->where('subject_id', $blueprint->subject_id)
             ->where('question_type_master_id', $section->question_type_master_id)
             ->when($blueprint->stream_id, fn($q) => $q->where('stream_id', $blueprint->stream_id))
             ->when($section->difficulty, fn($q) => $q->where('difficulty', $section->difficulty))
             ->count();
+
+        
     }
 
     private function calculateTotalQuestions(array $sections): int
@@ -410,5 +448,23 @@ class PaperBlueprintController extends Controller
         }
 
         return $counts;
+    }
+
+    private function ensureBlueprintAccess(PaperBlueprint $blueprint)
+    {
+        $user = auth()->user();
+        $userRole = $user->roleData?->slug ?? $user->role;
+
+        if (in_array($userRole, ['superadmin', 'super_admin'])) {
+            return null;
+        }
+
+        if ($blueprint->subscription_id !== $user->subscription_id) {
+            return response()->json([
+                'message' => 'You are not allowed to access this blueprint.',
+            ], 403);
+        }
+
+        return null;
     }
 }

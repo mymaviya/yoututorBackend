@@ -2,13 +2,20 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class AuditLog extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
-        'user_id',
+        
+        'subscription_id','user_id',
         'action',
+        'platform',
+        'browser',
+        'description',
         'module',
         'auditable_type',
         'auditable_id',
@@ -32,4 +39,10 @@ class AuditLog extends Model
     {
         return $this->morphTo();
     }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
 }

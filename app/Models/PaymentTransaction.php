@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class PaymentTransaction extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
         'subscription_id',
         'gateway',

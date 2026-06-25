@@ -9,8 +9,40 @@ use App\Services\AuditService;
 
 class UserSecurityController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $authUser = auth()->user();
+        $role = $authUser?->roleData?->slug ?? $authUser?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function tenantId(): ?int
+    {
+        return auth()->user()?->subscription_id;
+    }
+
+    private function ensureUserAccess(User $user)
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        if ((int) $user->subscription_id !== (int) $this->tenantId()) {
+            return response()->json([
+                'message' => 'You are not allowed to access this user security setting.',
+            ], 403);
+        }
+
+        return null;
+    }
+
     public function show(User $user)
     {
+        if ($response = $this->ensureUserAccess($user)) {
+            return $response;
+        }
+
         return response()->json([
             'session_timeout_minutes' => $user->session_timeout_minutes,
             'allow_multiple_sessions' => $user->allow_multiple_sessions,
@@ -24,6 +56,10 @@ class UserSecurityController extends Controller
 
     public function update(Request $request, User $user)
     {
+        if ($response = $this->ensureUserAccess($user)) {
+            return $response;
+        }
+
         $data = $request->validate([
             'session_timeout_minutes' => 'required|integer|min:5|max:1440',
             'allow_multiple_sessions' => 'required|boolean',
@@ -39,7 +75,13 @@ class UserSecurityController extends Controller
 
         $user->update($data);
 
-        AuditService::log('Security','Update','Security settings updated for user: ' . $user->name,$oldSettings,$user->fresh()->toArray());
+        AuditService::log(
+            'Security',
+            'Update',
+            'Security settings updated for user: ' . $user->name,
+            $oldSettings,
+            $user->fresh()->toArray()
+        );
 
         return response()->json([
             'message' => 'Security settings updated successfully',

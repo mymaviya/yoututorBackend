@@ -10,6 +10,7 @@ use App\Models\Stream;
 use App\Models\Subject;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Facades\Excel;
@@ -183,7 +184,9 @@ class QuestionTypeTemplateImport implements ToCollection
             }
 
             foreach ($template->items as $item) {
-                $exists = QuestionTypeAssignment::where('grade_id', $grade->id)
+                $exists = QuestionTypeAssignment::query()
+                    ->when(Schema::hasColumn('question_type_assignments', 'subscription_id') && auth()->check(), fn ($q) => $q->where('subscription_id', auth()->user()->subscription_id))
+                    ->where('grade_id', $grade->id)
                     ->where('stream_id', $streamId)
                     ->where('subject_id', $subject->id)
                     ->where('question_type_master_id', $item->question_type_master_id)
@@ -194,17 +197,29 @@ class QuestionTypeTemplateImport implements ToCollection
                     continue;
                 }
 
-                QuestionTypeAssignment::create([
+                QuestionTypeAssignment::create(array_merge($this->subscriptionPayload('question_type_assignments'), [
                     'grade_id' => $grade->id,
                     'stream_id' => $streamId,
                     'subject_id' => $subject->id,
                     'question_type_master_id' => $item->question_type_master_id,
                     'is_active' => true,
-                ]);
+                ]));
 
                 $this->created++;
             }
         }
+    }
+
+
+    private function subscriptionPayload(string $table): array
+    {
+        if (!auth()->check() || !Schema::hasColumn($table, 'subscription_id')) {
+            return [];
+        }
+
+        return [
+            'subscription_id' => auth()->user()->subscription_id,
+        ];
     }
 
     private function findSubject(int $gradeId, ?int $streamId, string $subjectName): ?Subject

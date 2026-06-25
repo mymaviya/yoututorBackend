@@ -11,6 +11,7 @@ use App\Models\Stream;
 use App\Models\Subject;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Maatwebsite\Excel\Concerns\ToCollection;
 
@@ -42,9 +43,10 @@ class QuestionImport implements ToCollection
                 $bloomLevel = strtolower(trim((string) ($row[7] ?? '')));
                 $marks = (float) ($row[8] ?? 1);
                 $answer = trim((string) ($row[9] ?? ''));
-                $optionsText = trim((string) ($row[10] ?? ''));
-                $correctOption = trim((string) ($row[11] ?? ''));
-                $matchPairsText = trim((string) ($row[12] ?? ''));
+                $explanation = trim((string) ($row[10] ?? ''));
+                $optionsText = trim((string) ($row[11] ?? ''));
+                $correctOption = trim((string) ($row[12] ?? ''));
+                $matchPairsText = trim((string) ($row[13] ?? ''));
 
                 if (!$gradeName || !$subjectName || !$questionTypeText || !$questionText) {
                     $this->skipped++;
@@ -115,7 +117,7 @@ class QuestionImport implements ToCollection
                     continue;
                 }
 
-                $question = Question::create([
+                $question = Question::create(array_merge($this->subscriptionPayload('questions'), [
                     'grade_id' => $grade->id,
                     'stream_id' => $subject->stream_id ?? $streamId,
                     'subject_id' => $subject->id,
@@ -126,6 +128,7 @@ class QuestionImport implements ToCollection
                     'bloom_level' => $bloomLevel ?: null,
                     'marks' => $marks ?: 1,
                     'answer' => $answer ?: null,
+                    'explanation' => $explanation ?: null,
                     'status' => 'approved',
                     'approved_by' => $this->createdBy,
                     'approved_at' => now(),
@@ -133,7 +136,7 @@ class QuestionImport implements ToCollection
                     'created_by' => $this->createdBy,
                     'created_at' => now(),
                     'updated_at' => now(),
-                ]);
+                ]));
 
                 $this->createOptions($question, $optionsText, $correctOption);
                 $this->createMatchPairs($question, $matchPairsText);
@@ -141,6 +144,18 @@ class QuestionImport implements ToCollection
                 $this->created++;
             }
         });
+    }
+
+
+    private function subscriptionPayload(string $table): array
+    {
+        if (!auth()->check() || !Schema::hasColumn($table, 'subscription_id')) {
+            return [];
+        }
+
+        return [
+            'subscription_id' => auth()->user()->subscription_id,
+        ];
     }
 
     private function findSubject(int $gradeId, ?int $streamId, string $subjectName): ?Subject

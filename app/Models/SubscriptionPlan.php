@@ -43,4 +43,18 @@ class SubscriptionPlan extends Model
     {
         return $this->hasMany(SubscriptionPlanFeatureItem::class);
     }
+
+    public function enabledFeatureItems()
+    {
+        return $this->hasMany(SubscriptionPlanFeatureItem::class)
+            ->where('is_enabled', true);
+    }
+
+    public function hasFeature(string $featureKey): bool
+    {
+        return $this->featureItems()
+            ->where('feature_key', $featureKey)
+            ->where('is_enabled', true)
+            ->exists();
+    }
 }

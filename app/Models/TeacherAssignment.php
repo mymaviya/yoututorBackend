@@ -2,12 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class TeacherAssignment extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
-        'teacher_id',
+        
+        'subscription_id','teacher_id',
         'grade_id',
         'stream_id',
         'subject_id',
@@ -35,4 +39,10 @@ class TeacherAssignment extends Model
     {
         return $this->belongsTo(Subject::class);
     }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
 }

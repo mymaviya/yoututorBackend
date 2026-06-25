@@ -13,16 +13,86 @@ use App\Imports\TeachersImport;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\TeacherImportTemplateExport;
 
-
 class TeacherController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $user = auth()->user();
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function tenantId(): ?int
+    {
+        return auth()->user()?->subscription_id;
+    }
+
     private function teacherQuery()
     {
-        return User::query()
+        $query = User::query()
             ->where(function ($q) {
                 $q->where('role', 'teacher')
-                    ->orWhereHas('roleData', fn($role) => $role->where('slug', 'teacher'));
+                    ->orWhereHas('roleData', fn ($role) => $role->where('slug', 'teacher'));
             });
+
+        if (! $this->isSuperAdmin()) {
+            $query->where('subscription_id', $this->tenantId());
+        }
+
+        return $query;
+    }
+
+    private function checkUserLimit(): ?\Illuminate\Http\JsonResponse
+    {
+        $subscription = auth()->user()?->subscription;
+
+        if (! $subscription || ! $subscription->max_users) {
+            return null;
+        }
+
+        $currentUsers = User::where('subscription_id', $subscription->id)->count();
+
+        if ($currentUsers >= $subscription->max_users) {
+            return response()->json([
+                'message' => 'User limit reached for this subscription plan.',
+                'errors' => [
+                    'subscription' => [
+                        'This subscription allows only ' . $subscription->max_users . ' users.',
+                    ],
+                ],
+            ], 422);
+        }
+
+        return null;
+    }
+
+    private function validateAssignmentsBelongToTenant(array $assignments): ?\Illuminate\Http\JsonResponse
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        foreach ($assignments as $item) {
+            $subjectExists = \App\Models\Subject::where('id', $item['subject_id'])
+                ->where('grade_id', $item['grade_id'])
+                ->where(function ($q) use ($item) {
+                    $q->whereNull('stream_id');
+
+                    if (! empty($item['stream_id'])) {
+                        $q->orWhere('stream_id', $item['stream_id']);
+                    }
+                })
+                ->exists();
+
+            if (! $subjectExists) {
+                return response()->json([
+                    'message' => 'Selected assignment does not belong to the selected grade/stream/subject.',
+                ], 422);
+            }
+        }
+
+        return null;
     }
 
     public function index()
@@ -49,6 +119,14 @@ class TeacherController extends Controller
             'assignments.*.subject_id' => 'required|exists:subjects,id',
         ]);
 
+        if ($response = $this->checkUserLimit()) {
+            return $response;
+        }
+
+        if ($response = $this->validateAssignmentsBelongToTenant($data['assignments'] ?? [])) {
+            return $response;
+        }
+
         return DB::transaction(function () use ($data) {
             $roleId = Role::where('slug', 'teacher')->value('id');
 
@@ -57,6 +135,7 @@ class TeacherController extends Controller
             $password = $namePart . substr($mobileDigits, 0, 6);
 
             $teacher = User::create([
+                'subscription_id' => $this->tenantId(),
                 'role_id' => $roleId,
                 'role' => 'teacher',
                 'name' => $data['name'],
@@ -109,6 +188,10 @@ class TeacherController extends Controller
             'assignments.*.subject_id' => 'required|exists:subjects,id',
         ]);
 
+        if ($response = $this->validateAssignmentsBelongToTenant($data['assignments'] ?? [])) {
+            return $response;
+        }
+
         return DB::transaction(function () use ($teacher, $data) {
             $teacher->update([
                 'name' => $data['name'],
@@ -153,7 +236,7 @@ class TeacherController extends Controller
             'file' => 'required|file|mimes:xlsx,xls,csv',
         ]);
 
-        $import = new TeachersImport();
+        $import = new TeachersImport($this->tenantId());
 
         Excel::import($import, $request->file('file'));
 

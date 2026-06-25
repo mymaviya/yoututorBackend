@@ -6,10 +6,58 @@ use App\Http\Controllers\Controller;
 use App\Models\Question;
 use App\Models\QuestionTypeMaster;
 use App\Models\TeacherQuestionTask;
+use App\Models\User;
 use Illuminate\Http\Request;
 
 class TeacherQuestionTaskController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $user = auth()->user();
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function tenantId(): ?int
+    {
+        return auth()->user()?->subscription_id;
+    }
+
+    private function ensureTaskAccess(TeacherQuestionTask $task)
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        if ((int) $task->subscription_id !== (int) $this->tenantId()) {
+            return response()->json([
+                'message' => 'You are not allowed to access this task.',
+            ], 403);
+        }
+
+        return null;
+    }
+
+    private function ensureTeacherBelongsToTenant(int $teacherId)
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        $teacher = User::where('id', $teacherId)
+            ->where('subscription_id', $this->tenantId())
+            ->first();
+
+        if (! $teacher) {
+            return response()->json([
+                'message' => 'Selected teacher does not belong to your subscription.',
+            ], 422);
+        }
+
+        return null;
+    }
+
     private function resolveQuestionTypeId($value): ?int
     {
         if (is_numeric($value)) {
@@ -23,11 +71,11 @@ class TeacherQuestionTaskController extends Controller
 
     private function createdCount(TeacherQuestionTask $task, $user): int
     {
-        return Question::where('created_by', $user->id)
+        return Question::where('subscription_id', $task->subscription_id)
+            ->where('created_by', $user->id)
             ->where('grade_id', $task->grade_id)
             ->where('subject_id', $task->subject_id)
             ->where('question_type_master_id', $task->question_type_master_id)
-
             ->where(function ($q) use ($task) {
                 $q->whereNull('stream_id');
 
@@ -35,21 +83,33 @@ class TeacherQuestionTaskController extends Controller
                     $q->orWhere('stream_id', $task->stream_id);
                 }
             })
-
-            ->when($task->lesson_id, function ($q) use ($task) {
-                $q->where('lesson_id', $task->lesson_id);
-            })
-
+            ->when($task->lesson_id, fn ($q) => $q->where('lesson_id', $task->lesson_id))
             ->count();
     }
 
     public function index()
     {
-        $tasks = TeacherQuestionTask::with(['teacher', 'grade', 'stream', 'subject', 'lesson', 'questionType', 'assignedBy'])
+        $query = TeacherQuestionTask::with([
+            'teacher',
+            'grade',
+            'stream',
+            'subject',
+            'lesson',
+            'questionType',
+            'assignedBy',
+        ]);
+
+        if (! $this->isSuperAdmin()) {
+            $query->where('subscription_id', $this->tenantId());
+        }
+
+        $tasks = $query
             ->latest()
             ->get()
             ->map(function ($task) {
-                $created = $task->teacher ? $this->createdCount($task, $task->teacher) : 0;
+                $created = $task->teacher
+                    ? $this->createdCount($task, $task->teacher)
+                    : 0;
 
                 return [
                     'id' => $task->id,
@@ -64,7 +124,9 @@ class TeacherQuestionTaskController extends Controller
                     'target_count' => $task->target_count,
                     'created_count' => $created,
                     'remaining_count' => max($task->target_count - $created, 0),
-                    'progress' => $task->target_count > 0 ? min(round(($created / $task->target_count) * 100), 100) : 0,
+                    'progress' => $task->target_count > 0
+                        ? min(round(($created / $task->target_count) * 100), 100)
+                        : 0,
                     'due_date' => $task->due_date,
                     'status' => $created >= $task->target_count ? 'completed' : $task->status,
                     'assigned_by' => $task->assignedBy,
@@ -79,6 +141,7 @@ class TeacherQuestionTaskController extends Controller
         $user = auth()->user();
 
         $tasks = TeacherQuestionTask::with(['grade', 'stream', 'subject', 'lesson', 'questionType', 'assignedBy'])
+            ->where('subscription_id', $user->subscription_id)
             ->where('teacher_id', $user->id)
             ->latest()
             ->get()
@@ -124,9 +187,13 @@ class TeacherQuestionTaskController extends Controller
             'remarks' => 'nullable|string',
         ]);
 
+        if ($response = $this->ensureTeacherBelongsToTenant((int) $data['teacher_id'])) {
+            return $response;
+        }
+
         $rawTypes = $data['question_type_master_ids'] ?? $data['question_types'] ?? [];
 
-        if (!count($rawTypes)) {
+        if (! count($rawTypes)) {
             return response()->json([
                 'message' => 'Please select at least one question type.',
                 'errors' => ['question_types' => ['Please select at least one question type.']],
@@ -138,11 +205,26 @@ class TeacherQuestionTaskController extends Controller
         foreach ($rawTypes as $rawType) {
             $questionTypeId = $this->resolveQuestionTypeId($rawType);
 
-            if (!$questionTypeId) {
+            if (! $questionTypeId) {
+                continue;
+            }
+
+            $duplicate = TeacherQuestionTask::where('subscription_id', $this->tenantId())
+                ->where('teacher_id', $data['teacher_id'])
+                ->where('grade_id', $data['grade_id'])
+                ->where('stream_id', $data['stream_id'] ?? null)
+                ->where('subject_id', $data['subject_id'])
+                ->where('lesson_id', $data['lesson_id'] ?? null)
+                ->where('question_type_master_id', $questionTypeId)
+                ->whereIn('status', ['assigned', 'in_progress'])
+                ->exists();
+
+            if ($duplicate) {
                 continue;
             }
 
             $task = TeacherQuestionTask::create([
+                'subscription_id' => $this->tenantId(),
                 'teacher_id' => $data['teacher_id'],
                 'assigned_by' => auth()->id(),
                 'grade_id' => $data['grade_id'],
@@ -179,6 +261,10 @@ class TeacherQuestionTaskController extends Controller
     {
         $task = TeacherQuestionTask::findOrFail($id);
 
+        if ($response = $this->ensureTaskAccess($task)) {
+            return $response;
+        }
+
         $data = $request->validate([
             'teacher_id' => 'required|exists:users,id',
             'grade_id' => 'required|exists:grades,id',
@@ -192,6 +278,10 @@ class TeacherQuestionTaskController extends Controller
             'remarks' => 'nullable|string',
         ]);
 
+        if ($response = $this->ensureTeacherBelongsToTenant((int) $data['teacher_id'])) {
+            return $response;
+        }
+
         $task->update($data);
 
         return response()->json([
@@ -202,7 +292,13 @@ class TeacherQuestionTaskController extends Controller
 
     public function destroy($id)
     {
-        TeacherQuestionTask::findOrFail($id)->delete();
+        $task = TeacherQuestionTask::findOrFail($id);
+
+        if ($response = $this->ensureTaskAccess($task)) {
+            return $response;
+        }
+
+        $task->delete();
 
         return response()->json(['message' => 'Task deleted successfully']);
     }

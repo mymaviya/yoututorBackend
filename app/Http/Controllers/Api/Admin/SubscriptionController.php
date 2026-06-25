@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use App\Mail\SubscriptionActivatedMail;
 use Illuminate\Support\Facades\Mail;
+use App\Models\Role;
+use App\Models\User;
 
 class SubscriptionController extends Controller
 {
@@ -19,7 +21,14 @@ class SubscriptionController extends Controller
         $query = Subscription::with([
             'plan',
             'licenseKey'
-        ]);
+        ])->withCount('users');
+
+        $user = auth()->user();
+        $userRole = $user->roleData?->slug ?? $user->role;
+
+        if (!in_array($userRole, ['superadmin', 'super_admin'])) {
+            $query->where('id', $user->subscription_id);
+        }
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -46,12 +55,22 @@ class SubscriptionController extends Controller
 
     public function show(Subscription $subscription)
     {
+        $user = auth()->user();
+        $userRole = $user->roleData?->slug ?? $user->role;
+
+        if (
+            !in_array($userRole, ['superadmin', 'super_admin']) &&
+            $user->subscription_id !== $subscription->id
+        ) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not allowed to view this subscription.',
+            ], 403);
+        }
+        
         return response()->json([
             'success' => true,
-            'data' => $subscription->load([
-                'plan',
-                'licenseKey'
-            ])
+            'data' => $subscription->load(['plan', 'licenseKey', 'users'])
         ]);
     }
 
@@ -64,6 +83,10 @@ class SubscriptionController extends Controller
             'mobile' => 'required|string|max:20',
             'email' => 'nullable|email|max:255',
             'days' => 'nullable|integer|min:1|max:36500',
+            'admin_name' => 'nullable|string|max:255',
+            'admin_email' => 'nullable|email|max:255|unique:users,email',
+            'admin_password' => 'nullable|string|min:6',
+            'max_users' => 'nullable|integer|min:1',
         ]);
 
         return DB::transaction(function () use ($validated) {
@@ -90,14 +113,16 @@ class SubscriptionController extends Controller
                 'ends_at' => now()->addDays($days)->toDateString(),
                 'is_trial' => $plan->is_trial,
                 'auto_renew' => false,
+                'school_code' => 'SCH-' . strtoupper(Str::random(6)),
+                'max_users' => $validated['max_users'] ?? null,
             ]);
 
-            if ($subscription->email) {
-                Mail::to($subscription->email)
-                    ->queue(
-                        new SubscriptionActivatedMail($subscription)
-                    );
-            }
+            // if ($subscription->email) {
+            //     Mail::to($subscription->email)
+            //         ->queue(
+            //             new SubscriptionActivatedMail($subscription)
+            //         );
+            // }
 
             $license = LicenseKey::create([
                 'subscription_id' => $subscription->id,
@@ -106,6 +131,28 @@ class SubscriptionController extends Controller
                 'activated_at' => now(),
                 'expires_at' => $subscription->ends_at,
             ]);
+
+            $adminUser = null;
+
+            if (!empty($validated['admin_email'])) {
+                $adminRole = Role::where('slug', 'admin')->first();
+
+                $adminUser = User::create([
+                    'subscription_id' => $subscription->id,
+                    'role_id' => $adminRole?->id,
+                    'role' => 'admin',
+                    'name' => $validated['admin_name'] ?? $subscription->contact_person,
+                    'email' => $validated['admin_email'],
+                    'password' => \Illuminate\Support\Facades\Hash::make(
+                        $validated['admin_password'] ?? '123456'
+                    ),
+                    'contact' => $subscription->mobile,
+                    'address' => null,
+                    'is_active' => true,
+                    'login_enabled' => true,
+                    'login_start_date' => now()->toDateString(),
+                ]);
+            }
 
             return response()->json([
                 'success' => true,
@@ -218,28 +265,68 @@ class SubscriptionController extends Controller
 
     public function currentStatus()
     {
-        $userRole = auth()->user()->roleData?->slug
-            ?? auth()->user()->role;
+        $user = auth()->user();
 
+        $userRole = $user->roleData?->slug ?? $user->role;
         $isSuperAdmin = in_array($userRole, ['superadmin', 'super_admin']);
+
+        if ($isSuperAdmin) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'total' => Subscription::count(),
+                    'active' => Subscription::where('status', 'active')->count(),
+                    'trial' => Subscription::where('status', 'trial')->count(),
+                    'expired' => Subscription::where('status', 'expired')->count(),
+                    'suspended' => Subscription::where('status', 'suspended')->count(),
+                    'cancelled' => Subscription::where('status', 'cancelled')->count(),
+                    'pending_payment' => Subscription::where('status', 'pending_payment')->count(),
+                    'revenue' => Subscription::where('status', 'active')->sum('amount'),
+                    'expiring_soon' => Subscription::whereDate('ends_at', '<=', now()->addDays(7))
+                        ->whereIn('status', ['trial', 'active'])
+                        ->count(),
+
+                    'show_subscription_alert' => false,
+                    'is_superadmin' => true,
+                ],
+            ]);
+        }
+
+        $subscription = $user->subscription?->load(['plan', 'licenseKey']);
+
+        if (!$subscription) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'has_subscription' => false,
+                    'show_subscription_alert' => true,
+                    'is_superadmin' => false,
+                    'message' => 'No subscription is assigned to your account.',
+                ],
+            ]);
+        }
+
+        $isValid = in_array($subscription->status, ['trial', 'active'])
+            && (!$subscription->ends_at || now()->lte($subscription->ends_at));
 
         return response()->json([
             'success' => true,
             'data' => [
-                'total' => Subscription::count(),
-                'active' => Subscription::where('status', 'active')->count(),
-                'trial' => Subscription::where('status', 'trial')->count(),
-                'expired' => Subscription::where('status', 'expired')->count(),
-                'suspended' => Subscription::where('status', 'suspended')->count(),
-                'cancelled' => Subscription::where('status', 'cancelled')->count(),
-                'pending_payment' => Subscription::where('status', 'pending_payment')->count(),
-                'revenue' => Subscription::where('status', 'active')->sum('amount'),
-                'expiring_soon' => Subscription::whereDate('ends_at', '<=', now()->addDays(7))
-                    ->whereIn('status', ['trial', 'active'])
-                    ->count(),
+                'has_subscription' => true,
+                'subscription_id' => $subscription->id,
+                'school_name' => $subscription->school_name,
+                'plan_name' => $subscription->plan?->name,
+                'status' => $subscription->status,
+                'starts_at' => $subscription->starts_at,
+                'ends_at' => $subscription->ends_at,
+                'days_left' => $subscription->ends_at
+                    ? max(now()->diffInDays($subscription->ends_at, false), 0)
+                    : null,
+                'license_status' => $subscription->licenseKey?->status,
+                'is_valid' => $isValid,
 
-                'show_subscription_alert' => !$isSuperAdmin,
-                'is_superadmin' => $isSuperAdmin,
+                'show_subscription_alert' => !$isValid,
+                'is_superadmin' => false,
             ],
         ]);
     }

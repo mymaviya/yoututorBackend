@@ -47,7 +47,7 @@ use App\Http\Controllers\Api\Public\SubscriptionPlanController;
 use App\Http\Controllers\Api\Public\DemoEnquiryController;
 use App\Http\Controllers\Api\Public\RazorpayPaymentController;
 use App\Http\Controllers\Api\Public\PublicSettingController;
-use App\Http\Controllers\Api\Admin\SubscriptionRenewalController;
+use App\Http\Controllers\Api\Public\RazorpayWebhookController;
 
 use App\Http\Controllers\Api\Admin\DemoEnquiryController as AdminDemoEnquiryController;
 use App\Http\Controllers\Api\Admin\SubscriptionController;
@@ -55,7 +55,7 @@ use App\Http\Controllers\Api\Admin\SubscriptionPlanController as AdminSubscripti
 use App\Http\Controllers\Api\Admin\SettingController;
 use App\Http\Controllers\Api\Admin\PaymentTransactionController;
 use App\Http\Controllers\Api\Admin\LicenseKeyController;
-use App\Http\Controllers\Api\Public\RazorpayWebhookController;
+use App\Http\Controllers\Api\Admin\SubscriptionRenewalController;
 
 use App\Http\Controllers\Api\ProposalTemplateController;
 use App\Http\Controllers\Api\ProposalController;
@@ -80,8 +80,6 @@ Route::post('/login', [AuthController::class, 'login']);
 |--------------------------------------------------------------------------
 | Public Website Routes
 |--------------------------------------------------------------------------
-| These routes must remain open for website, pricing, demo enquiry,
-| settings, checkout and Razorpay payment flow.
 */
 
 Route::prefix('public')->group(function () {
@@ -96,17 +94,15 @@ Route::prefix('public/payment')->group(function () {
 });
 
 Route::post('/webhooks/razorpay', [RazorpayWebhookController::class, 'handle']);
+
 /*
 |--------------------------------------------------------------------------
 | Authenticated Common Routes
 |--------------------------------------------------------------------------
-| These routes must work even if subscription is expired, because users
-| need logout, current user, password change and basic profile access.
 */
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
-
     Route::post('/change-first-password', [AuthController::class, 'changeFirstPassword']);
 
     Route::post('/heartbeat', function (Request $request) {
@@ -122,28 +118,37 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/current-user', function (Request $request) {
         $user = $request->user();
 
-        $user->loadMissing('roleData.permissions');
+        $user->loadMissing([
+            'roleData.permissions',
+            'subscription.plan.featureItems',
+        ]);
 
         $roleSlug = $user->roleData?->slug ?? $user->role;
 
         $permissionSlugs = $user->roleData?->permissions->pluck('slug') ?? collect();
 
-        $subscription = \App\Models\Subscription::with('plan.featureItems')
-            ->whereIn('status', ['active', 'trial'])
-            ->whereDate('ends_at', '>=', now())
-            ->latest()
-            ->first();
+        $isSuperAdmin = in_array($roleSlug, ['superadmin', 'super_admin'], true);
 
-        $allowedFeatureKeys = $subscription?->plan?->featureItems
-            ?->where('is_enabled', true)
-            ->pluck('feature_key')
-            ?? collect();
+        $subscription = $user->subscription;
+
+        $allowedFeatureKeys = $isSuperAdmin
+            ? SidebarMenu::whereNotNull('feature_key')->pluck('feature_key')
+            : (
+                $subscription?->plan?->featureItems
+                    ?->where('is_enabled', true)
+                    ->pluck('feature_key')
+                ?? collect()
+            );
 
         $sidebarMenus = SidebarMenu::where('is_active', true)
             ->where('show_in_sidebar', true)
             ->orderBy('sort_order')
             ->get()
-            ->filter(function ($menu) use ($permissionSlugs, $roleSlug, $allowedFeatureKeys) {
+            ->filter(function ($menu) use ($permissionSlugs, $roleSlug, $allowedFeatureKeys, $isSuperAdmin) {
+                if ($isSuperAdmin) {
+                    return true;
+                }
+
                 if (!empty($menu->role_slug) && $menu->role_slug !== $roleSlug) {
                     return false;
                 }
@@ -167,6 +172,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         return response()->json([
             'id' => $user->id,
+            'subscription_id' => $user->subscription_id,
             'name' => $user->name,
             'email' => $user->email,
             'contact' => $user->contact,
@@ -183,6 +189,7 @@ Route::middleware('auth:sanctum')->group(function () {
             'sidebar_menus' => $sidebarMenus,
             'dashboard_route' => $dashboardRoute,
             'password_change_required' => (bool) $user->password_change_required,
+            'allowed_feature_keys' => $allowedFeatureKeys->values(),
         ]);
     });
 
@@ -194,24 +201,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
     Route::post('/notifications/mark-group-read', [NotificationController::class, 'markGroupRead']);
+
+    Route::get('/my-subscription-status', [SubscriptionController::class, 'currentStatus']);
 });
 
 /*
 |--------------------------------------------------------------------------
-| SaaS Admin Management Routes
+| SaaS Super Admin Management Routes
 |--------------------------------------------------------------------------
-| These are not protected by CheckActiveSubscription so super admin can
-| renew, activate, extend or manage subscriptions even after expiry.
 */
 
-Route::middleware(['auth:sanctum', 'role:admin, superadmin'])
+Route::middleware(['auth:sanctum', 'role:superadmin,super_admin'])
     ->prefix('admin')
     ->group(function () {
         Route::apiResource('subscription-plans', AdminSubscriptionPlanController::class);
 
         Route::get('/subscriptions/dashboard', [SubscriptionController::class, 'dashboard']);
         Route::get('/subscription-status', [SubscriptionController::class, 'currentStatus']);
-
         Route::apiResource('subscriptions', SubscriptionController::class);
 
         Route::put('/subscriptions/{subscription}/activate-paid-plan', [SubscriptionController::class, 'activate']);
@@ -251,12 +257,7 @@ Route::middleware(['auth:sanctum', 'role:admin, superadmin'])
         Route::put('/proposal-templates/{id}', [ProposalTemplateController::class, 'update']);
         Route::delete('/proposal-templates/{id}', [ProposalTemplateController::class, 'destroy']);
 
-        Route::get('/proposals', [ProposalController::class, 'index']);
-        Route::post('/proposals', [ProposalController::class, 'store']);
-        Route::get('/proposals/{id}', [ProposalController::class, 'show']);
-        Route::put('/proposals/{id}', [ProposalController::class, 'update']);
-        Route::delete('/proposals/{id}', [ProposalController::class, 'destroy']);
-
+        Route::apiResource('proposals', ProposalController::class);
         Route::put('/proposals/{id}/sections', [ProposalController::class, 'updateSections']);
         Route::put('/proposals/{id}/items', [ProposalController::class, 'updateItems']);
         Route::get('/proposals/{id}/versions', [ProposalController::class, 'versions']);
@@ -292,7 +293,6 @@ Route::middleware(['auth:sanctum', 'role:admin, superadmin'])
 |--------------------------------------------------------------------------
 | ERP Protected Routes
 |--------------------------------------------------------------------------
-| These routes require valid Sanctum login and active SaaS subscription.
 */
 
 Route::middleware([
@@ -305,22 +305,13 @@ Route::middleware([
         return Stream::where('is_active', true)
             ->orderBy('name')
             ->get();
-    });
+    })->name('streams.index');
 
-    /*
-    |--------------------------------------------------------------------------
-    | Admin / Teacher Common Academic Routes
-    |--------------------------------------------------------------------------
-    */
-
-    Route::middleware('role:admin, superadmin,teacher')->group(function () {
+    Route::middleware('role:admin,superadmin,super_admin,teacher')->group(function () {
         Route::get('/grades', [GradeController::class, 'index'])->name('grades.index');
         Route::get('/subjects', [SubjectController::class, 'index'])->name('subjects.index');
         Route::get('/lessons', [LessonController::class, 'index'])->name('lessons.index');
         Route::get('/question-types', [QuestionTypeController::class, 'index'])->name('question.types');
-
-        Route::get('/questions/import-template', [QuestionController::class, 'downloadTemplate']);
-        Route::post('/questions/import', [QuestionController::class, 'import']);
 
         Route::apiResource('questions', QuestionController::class)->names([
             'index' => 'questions.index',
@@ -329,6 +320,7 @@ Route::middleware([
             'update' => 'questions.edit',
             'destroy' => 'questions.delete',
         ]);
+
         Route::apiResource('question-papers', QuestionPaperController::class)->names([
             'index' => 'papers.index',
             'store' => 'papers.create',
@@ -337,17 +329,29 @@ Route::middleware([
             'destroy' => 'papers.delete',
         ]);
 
-        Route::post('/papers/auto-generate', [QuestionPaperController::class, 'autoGenerate']);
-        Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generateFromBlueprint']);
-        Route::get('/question-papers/{id}/pdf', [QuestionPaperPdfController::class, 'download']);
+        Route::post('/papers/auto-generate', [QuestionPaperController::class, 'autoGenerate'])
+            ->name('papers.auto-generate');
 
-        Route::post('/paper-generator/preview', [PaperGeneratorController::class, 'preview']);
-        Route::post('/paper-generator/generate', [PaperGeneratorController::class, 'generate']);
+        Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generateFromBlueprint'])
+            ->name('papers.generate-from-blueprint');
 
-        Route::get('/teacher/my-question-tasks', [TeacherQuestionTaskController::class, 'myTasks']);
+        Route::get('/question-papers/{id}/pdf', [QuestionPaperPdfController::class, 'download'])
+            ->name('question-papers.pdf');
 
-        Route::get('/my-exam-portions', [ExamPortionController::class, 'myPortions']);
-        Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit']);
+        Route::post('/paper-generator/preview', [PaperGeneratorController::class, 'preview'])
+            ->name('paper.generator.preview');
+
+        Route::post('/paper-generator/generate', [PaperGeneratorController::class, 'generate'])
+            ->name('paper.generator.generate');
+
+        Route::get('/teacher/my-question-tasks', [TeacherQuestionTaskController::class, 'myTasks'])
+            ->name('teacher.my.tasks');
+
+        Route::get('/my-exam-portions', [ExamPortionController::class, 'myPortions'])
+            ->name('teacher.exam.portions');
+
+        Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit'])
+            ->name('exam-portions.submit');
 
         Route::get('/my-assignments', function () {
             $user = auth()->user();
@@ -376,30 +380,20 @@ Route::middleware([
 
             return response()->json([
                 'is_admin' => false,
-                'grades' => $assignments
-                    ->pluck('grade')
-                    ->filter()
-                    ->unique('id')
-                    ->values(),
+                'grades' => $assignments->pluck('grade')->filter()->unique('id')->values(),
                 'subjects' => $assignments
-                    ->filter(fn($assignment) => $assignment->subject)
-                    ->map(fn($assignment) => [
+                    ->filter(fn ($assignment) => $assignment->subject)
+                    ->map(fn ($assignment) => [
                         'id' => $assignment->subject->id,
                         'name' => $assignment->subject->name,
                         'grade_id' => $assignment->grade_id,
                     ])
                     ->values(),
             ]);
-        });
+        })->name('teacher.assignments');
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Admin Academic / ERP Management Routes
-    |--------------------------------------------------------------------------
-    */
-
-    Route::middleware('role:admin, superadmin')->group(function () {
+    Route::middleware('role:admin,superadmin,super_admin')->group(function () {
         Route::get('/app-routes', function () {
             return collect(RouteFacade::getRoutes())
                 ->map(function ($route) {
@@ -410,120 +404,172 @@ Route::middleware([
                         'action' => $route->getActionName(),
                     ];
                 })
-                ->filter(fn($route) => $route['name'])
+                ->filter(fn ($route) => $route['name'])
                 ->values();
-        });
+        })->name('app.routes');
 
-        Route::get('/dashboard', [DashboardController::class, 'index']);
+        Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
-     
-        Route::post('/lessons/import', [LessonController::class, 'import']);
-        Route::get('/lessons/import-template', [LessonController::class, 'downloadTemplate']);
+        Route::get('/questions/import-template', [QuestionController::class, 'downloadTemplate'])
+            ->name('question.import.template');
+
+        Route::post('/questions/import', [QuestionController::class, 'import'])
+            ->name('question.import');
+
+        Route::post('/lessons/import', [LessonController::class, 'import'])
+            ->name('lesson.import');
+
+        Route::get('/lessons/import-template', [LessonController::class, 'downloadTemplate'])
+            ->name('lesson.import.template');
 
         Route::apiResource('grades', GradeController::class)->except(['index']);
-        Route::post('/grade_status/{id}', [GradeController::class, 'status']);
+        Route::post('/grade_status/{id}', [GradeController::class, 'status'])->name('grades.status');
 
         Route::apiResource('subjects', SubjectController::class)->except(['index']);
-        Route::post('/subjects/{id}/status', [SubjectController::class, 'status']);
+        Route::post('/subjects/{id}/status', [SubjectController::class, 'status'])->name('subjects.status');
 
         Route::apiResource('lessons', LessonController::class)->except(['index']);
 
-        Route::apiResource('teacher-question-tasks', TeacherQuestionTaskController::class);
-        Route::get('/reports/teacher-question-paper-progress', [TeacherReportController::class, 'questionPaperProgress']);
+        Route::apiResource('teacher-question-tasks', TeacherQuestionTaskController::class)->names([
+            'index' => 'teacher.tasks',
+        ]);
 
-        Route::get('/question-approvals', [QuestionApprovalController::class, 'index']);
-        Route::post('/question-approvals/{question}/reject', [QuestionApprovalController::class, 'reject']);
-        Route::post('/question-approvals/{question}/approve', [QuestionApprovalController::class, 'approve']);
+        Route::get('/reports/teacher-question-paper-progress', [TeacherReportController::class, 'questionPaperProgress'])
+            ->name('teacher.progress');
 
-        Route::apiResource('exam-portions', ExamPortionController::class);
-        Route::post('/exam-portions/{examPortion}/approve', [ExamPortionController::class, 'approve']);
-        Route::post('/exam-portions/{examPortion}/reject', [ExamPortionController::class, 'reject']);
+        Route::get('/question-approvals', [QuestionApprovalController::class, 'index'])
+            ->name('question.approvals');
 
-        Route::apiResource('exam-names', ExamNameController::class);
-        Route::post('/exam-names/{examName}/status', [ExamNameController::class, 'status']);
+        Route::post('/question-approvals/{question}/reject', [QuestionApprovalController::class, 'reject'])
+            ->name('question.approvals.reject');
 
-        Route::get('/paper-blueprints/dropdown', [PaperBlueprintController::class, 'dropdown']);
-        Route::post('/paper-blueprints/{id}/status', [PaperBlueprintController::class, 'status']);
-        Route::post('/paper-blueprints/{id}/copy', [PaperBlueprintController::class, 'copy']);
-        Route::apiResource('paper-blueprints', PaperBlueprintController::class);
+        Route::post('/question-approvals/{question}/approve', [QuestionApprovalController::class, 'approve'])
+            ->name('question.approvals.approve');
 
-        Route::post('/question-types/{questionType}/status', [QuestionTypeController::class, 'status']);
-        Route::post('/question-types/import', [QuestionTypeController::class, 'import']);
-        Route::get('/question-types/template', [QuestionTypeController::class, 'downloadTemplate']);
+        Route::apiResource('exam-portions', ExamPortionController::class)->names([
+            'index' => 'exam.portions',
+        ]);
+
+        Route::post('/exam-portions/{examPortion}/approve', [ExamPortionController::class, 'approve'])
+            ->name('exam-portions.approve');
+
+        Route::post('/exam-portions/{examPortion}/reject', [ExamPortionController::class, 'reject'])
+            ->name('exam-portions.reject');
+
+        Route::apiResource('exam-names', ExamNameController::class)->names([
+            'index' => 'exam.names',
+        ]);
+
+        Route::post('/exam-names/{examName}/status', [ExamNameController::class, 'status'])
+            ->name('exam-names.status');
+
+        Route::get('/paper-blueprints/dropdown', [PaperBlueprintController::class, 'dropdown'])
+            ->name('paper.blueprints.dropdown');
+
+        Route::post('/paper-blueprints/{id}/status', [PaperBlueprintController::class, 'status'])
+            ->name('paper.blueprints.status');
+
+        Route::post('/paper-blueprints/{id}/copy', [PaperBlueprintController::class, 'copy'])
+            ->name('paper.blueprints.copy');
+
+        Route::apiResource('paper-blueprints', PaperBlueprintController::class)->names([
+            'index' => 'paper.blueprints',
+        ]);
+
+        Route::post('/question-types/{questionType}/status', [QuestionTypeController::class, 'status'])
+            ->name('question-types.status');
+
+        Route::post('/question-types/import', [QuestionTypeController::class, 'import'])
+            ->name('question-types.import');
+
+        Route::get('/question-types/template', [QuestionTypeController::class, 'downloadTemplate'])
+            ->name('question-type-templates');
+
         Route::apiResource('question-types', QuestionTypeController::class)->except(['index']);
 
-        Route::get('/language-questions/group', [LanguageQuestionController::class, 'group']);
-        Route::get('/teacher-analytics', [TeacherAnalyticsController::class, 'index']);
+        Route::get('/language-questions/group', [LanguageQuestionController::class, 'group'])
+            ->name('language.questions.group');
+
+        Route::get('/teacher-analytics', [TeacherAnalyticsController::class, 'index'])
+            ->name('teacher.analytics');
 
         Route::apiResource('roles', RoleController::class);
         Route::apiResource('permissions', PermissionController::class);
 
-        Route::get('/users', [UserController::class, 'index']);
-        Route::get('/roles/{role}/permissions', [RoleController::class, 'permissions']);
-        Route::post('/roles/{role}/permissions', [RoleController::class, 'syncPermissions']);
-        Route::get('/users/{user}/permissions', [UserController::class, 'permissions']);
-        Route::post('/users/{user}/permissions', [UserController::class, 'syncPermissions']);
-        Route::post('/users/bulk-login-access', [UserController::class, 'bulkLoginAccess']);
+        Route::get('/users', [UserController::class, 'index'])->name('users.index');
+        Route::get('/roles/{role}/permissions', [RoleController::class, 'permissions'])->name('roles.permissions');
+        Route::post('/roles/{role}/permissions', [RoleController::class, 'syncPermissions'])->name('roles.permissions.sync');
+        Route::get('/users/{user}/permissions', [UserController::class, 'permissions'])->name('users.permissions');
+        Route::post('/users/{user}/permissions', [UserController::class, 'syncPermissions'])->name('users.permissions.sync');
+        Route::post('/users/bulk-login-access', [UserController::class, 'bulkLoginAccess'])->name('users.bulk-login-access');
         Route::apiResource('users', UserController::class);
 
         Route::apiResource('login-holidays', LoginHolidayController::class);
 
-        Route::get('/user-devices', [UserDeviceController::class, 'index']);
-        Route::post('/user-devices/{device}/trust', [UserDeviceController::class, 'trust']);
-        Route::post('/user-devices/{device}/block', [UserDeviceController::class, 'block']);
-        Route::delete('/user-devices/{device}', [UserDeviceController::class, 'destroy']);
+        Route::get('/user-devices', [UserDeviceController::class, 'index'])->name('user-devices.index');
+        Route::post('/user-devices/{device}/trust', [UserDeviceController::class, 'trust'])->name('user-devices.trust');
+        Route::post('/user-devices/{device}/block', [UserDeviceController::class, 'block'])->name('user-devices.block');
+        Route::delete('/user-devices/{device}', [UserDeviceController::class, 'destroy'])->name('user-devices.destroy');
 
-        Route::get('/users/{user}/security', [UserSecurityController::class, 'show']);
-        Route::put('/users/{user}/security', [UserSecurityController::class, 'update']);
+        Route::get('/users/{user}/security', [UserSecurityController::class, 'show'])->name('users.security.show');
+        Route::put('/users/{user}/security', [UserSecurityController::class, 'update'])->name('users.security.update');
 
-        Route::get('/audit-logs', [AuditLogController::class, 'index']);
+        Route::get('/audit-logs', [AuditLogController::class, 'index'])->name('audit.logs');
 
-        Route::post('/teachers/import-preview', [TeacherController::class, 'importPreview']);
-        Route::get('/teachers/importTemplate', [TeacherController::class, 'downloadTemplate']);
-        Route::post('/teachers/import', [TeacherController::class, 'import']);
-        Route::apiResource('teachers', TeacherController::class);
+        Route::post('/teachers/import-preview', [TeacherController::class, 'importPreview'])->name('teachers.import.preview');
+        Route::get('/teachers/importTemplate', [TeacherController::class, 'downloadTemplate'])->name('teachers.import.template');
+        Route::post('/teachers/import', [TeacherController::class, 'import'])->name('teachers.import');
+        Route::apiResource('teachers', TeacherController::class)->names([
+            'index' => 'teachers.index',
+        ]);
 
-        Route::post('/sidebar-menus/reorder', [SidebarMenuController::class, 'reorder']);
+        Route::post('/sidebar-menus/reorder', [SidebarMenuController::class, 'reorder'])->name('sidebar-menus.reorder');
         Route::apiResource('sidebar-menus', SidebarMenuController::class);
 
-        Route::post('/question-papers/{id}/finalize', [QuestionPaperController::class, 'finalize']);
-        Route::post('/question-papers/{id}/reopen', [QuestionPaperController::class, 'reopen']);
-        Route::post('/question-papers/{id}/printed', [QuestionPaperController::class, 'markPrinted']);
-        Route::post('/question-papers/{id}/archive', [QuestionPaperController::class, 'archive']);
+        Route::post('/question-papers/{id}/finalize', [QuestionPaperController::class, 'finalize'])->name('question-papers.finalize');
+        Route::post('/question-papers/{id}/reopen', [QuestionPaperController::class, 'reopen'])->name('question-papers.reopen');
+        Route::post('/question-papers/{id}/printed', [QuestionPaperController::class, 'markPrinted'])->name('question-papers.printed');
+        Route::post('/question-papers/{id}/archive', [QuestionPaperController::class, 'archive'])->name('question-papers.archive');
 
-        Route::apiResource('subject-templates', SubjectTemplateController::class);
-        Route::post('/subject-templates/{subjectTemplate}/apply', [SubjectTemplateController::class, 'apply']);
+        Route::apiResource('subject-templates', SubjectTemplateController::class)->names([
+            'index' => 'subject-templates',
+        ]);
 
-        Route::get('/question-type-template-masters', [QuestionTypeTemplateController::class, 'masters']);
+        Route::post('/subject-templates/{subjectTemplate}/apply', [SubjectTemplateController::class, 'apply'])
+            ->name('subject-templates.apply');
+
+        Route::get('/question-type-template-masters', [QuestionTypeTemplateController::class, 'masters'])
+            ->name('question-type-template-masters');
+
         Route::apiResource('question-type-templates', QuestionTypeTemplateController::class);
-        Route::post('/question-type-templates/{questionTypeTemplate}/apply', [QuestionTypeTemplateController::class, 'apply']);
 
-        Route::post('/blueprint-import/question-type-template', [BlueprintImportController::class, 'importQuestionTypeTemplate']);
-        Route::post('/blueprint-import/paper-blueprint', [BlueprintImportController::class, 'importPaperBlueprint']);
-        Route::post('/blueprint-import/all', [BlueprintImportController::class, 'importAll']);
-        Route::get('/blueprint-import/template', [BlueprintImportController::class, 'downloadTemplate']);
+        Route::post('/question-type-templates/{questionTypeTemplate}/apply', [QuestionTypeTemplateController::class, 'apply'])
+            ->name('question-type-templates.apply');
+
+        Route::post('/blueprint-import/question-type-template', [BlueprintImportController::class, 'importQuestionTypeTemplate'])
+            ->name('blueprint.import.question-type-template');
+
+        Route::post('/blueprint-import/paper-blueprint', [BlueprintImportController::class, 'importPaperBlueprint'])
+            ->name('blueprint.import.paper-blueprint');
+
+        Route::post('/blueprint-import/all', [BlueprintImportController::class, 'importAll'])
+            ->name('blueprint.import.all');
+
+        Route::get('/blueprint-import/template', [BlueprintImportController::class, 'downloadTemplate'])
+            ->name('blueprint.excel');
     });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Teacher Routes
-    |--------------------------------------------------------------------------
-    */
 
     Route::middleware('role:teacher')->group(function () {
-        Route::get('/teacher/dashboard', [TeacherDashboardController::class, 'index']);
-        Route::get('/students', [StudentController::class, 'index']);
-    });
+        Route::get('/teacher/dashboard', [TeacherDashboardController::class, 'index'])
+            ->name('teacher.dashboard');
 
-    /*
-    |--------------------------------------------------------------------------
-    | Student Routes
-    |--------------------------------------------------------------------------
-    */
+        Route::get('/students', [StudentController::class, 'index'])
+            ->name('students.index');
+    });
 
     Route::middleware('role:student')->group(function () {
         Route::get('/profile', function (Request $request) {
             return $request->user();
-        });
+        })->name('student.profile');
     });
 });

@@ -46,8 +46,10 @@ class AutoPaperGeneratorService
                 );
 
                 foreach ($questions as $question) {
-                    if ($question->bloom_level && isset($remainingBloomCounts[$question->bloom_level])) {
-                        $remainingBloomCounts[$question->bloom_level]--;
+                    $level = strtolower((string) $question->bloom_level);
+
+                    if ($level !== '' && isset($remainingBloomCounts[$level])) {
+                        $remainingBloomCounts[$level] = max(0, (int) $remainingBloomCounts[$level] - 1);
                     }
                 }
 
@@ -94,8 +96,12 @@ class AutoPaperGeneratorService
         array $remainingBloomCounts,
         bool $moderateMode
     ): Collection {
-        $requiredCount = (int) $item['question_count'];
+        $requiredCount = (int) ($item['question_count'] ?? 0);
         $picked = collect();
+
+        if ($requiredCount <= 0) {
+            return $picked;
+        }
 
         $activeBloomLevels = collect($remainingBloomCounts)
             ->filter(fn ($count) => (int) $count > 0)
@@ -115,9 +121,14 @@ class AutoPaperGeneratorService
                 continue;
             }
 
+            $excludedIds = array_values(array_unique(array_merge(
+                $this->usedQuestionIds,
+                $picked->pluck('id')->toArray()
+            )));
+
             $questions = $this->baseQuestionQuery($blueprint, $item, $moderateMode)
                 ->where('bloom_level', $bloomLevel)
-                ->whereNotIn('id', array_merge($this->usedQuestionIds, $picked->pluck('id')->toArray()))
+                ->when(! empty($excludedIds), fn ($query) => $query->whereNotIn('id', $excludedIds))
                 ->inRandomOrder()
                 ->limit($limit)
                 ->get();
@@ -126,8 +137,13 @@ class AutoPaperGeneratorService
         }
 
         if ($picked->count() < $requiredCount) {
+            $excludedIds = array_values(array_unique(array_merge(
+                $this->usedQuestionIds,
+                $picked->pluck('id')->toArray()
+            )));
+
             $fallback = $this->baseQuestionQuery($blueprint, $item, $moderateMode)
-                ->whereNotIn('id', array_merge($this->usedQuestionIds, $picked->pluck('id')->toArray()))
+                ->when(! empty($excludedIds), fn ($query) => $query->whereNotIn('id', $excludedIds))
                 ->inRandomOrder()
                 ->limit($requiredCount - $picked->count())
                 ->get();
@@ -146,10 +162,10 @@ class AutoPaperGeneratorService
             ];
         }
 
-        $this->usedQuestionIds = array_merge(
+        $this->usedQuestionIds = array_values(array_unique(array_merge(
             $this->usedQuestionIds,
             $picked->pluck('id')->toArray()
-        );
+        )));
 
         return $picked->values();
     }
@@ -164,12 +180,15 @@ class AutoPaperGeneratorService
             'options',
             'matchPairs',
         ])
+            // Keep this explicit even if Question model uses BelongsToSubscription.
+            // This is important for superadmin too: generating from School A blueprint must use School A questions only.
+            ->when($blueprint->subscription_id, fn ($query) => $query->where('subscription_id', $blueprint->subscription_id))
             ->where('status', 'approved')
             ->where('grade_id', $blueprint->grade_id)
             ->where('subject_id', $blueprint->subject_id)
             ->where('question_type_master_id', $item['question_type_master_id'])
-            ->when($blueprint->stream_id, fn ($q) => $q->where('stream_id', $blueprint->stream_id))
-            ->when(!$moderateMode && !empty($item['difficulty']), fn ($q) => $q->where('difficulty', $item['difficulty']));
+            ->when($blueprint->stream_id, fn ($query) => $query->where('stream_id', $blueprint->stream_id))
+            ->when(! $moderateMode && ! empty($item['difficulty']), fn ($query) => $query->where('difficulty', $item['difficulty']));
     }
 
     protected function validateBloomCompletion(array $remainingBloomCounts): void
@@ -193,7 +212,7 @@ class AutoPaperGeneratorService
                 return $section->bloomLevels
                     ->filter(fn ($bloom) => (int) $bloom->calculated_count > 0)
                     ->map(fn ($bloom) => [
-                        'bloom_level' => $bloom->bloom_level,
+                        'bloom_level' => strtolower((string) $bloom->bloom_level),
                         'percentage' => (float) $bloom->percentage,
                         'calculated_count' => (int) $bloom->calculated_count,
                     ])

@@ -8,9 +8,36 @@ use App\Models\SubjectTemplate;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Schema;
 
 class SubjectTemplateController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $user = auth()->user();
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function applyTenantScope($query, string $table)
+    {
+        if (! $this->isSuperAdmin() && Schema::hasColumn($table, 'subscription_id')) {
+            $query->where($table . '.subscription_id', auth()->user()?->subscription_id);
+        }
+
+        return $query;
+    }
+
+    private function addTenantId(array $data, string $table): array
+    {
+        if (Schema::hasColumn($table, 'subscription_id')) {
+            $data['subscription_id'] = auth()->user()?->subscription_id;
+        }
+
+        return $data;
+    }
+
     public function index()
     {
         return SubjectTemplate::with('items')
@@ -110,7 +137,7 @@ class SubjectTemplateController extends Controller
                         ? null
                         : ($validated['stream_id'] ?? null);
 
-                    $exists = Subject::where('grade_id', $gradeId)
+                    $exists = $this->applyTenantScope(Subject::where('grade_id', $gradeId), 'subjects')
                         ->where(function ($q) use ($streamId) {
                             if ($streamId) {
                                 $q->where('stream_id', $streamId);
@@ -126,12 +153,12 @@ class SubjectTemplateController extends Controller
                         continue;
                     }
 
-                    Subject::create([
+                    Subject::create($this->addTenantId([
                         'grade_id' => $gradeId,
                         'stream_id' => $streamId,
                         'name' => $subjectName,
                         'is_active' => true,
-                    ]);
+                    ], 'subjects'));
 
                     $created++;
                 }

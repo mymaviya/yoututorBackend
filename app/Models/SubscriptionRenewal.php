@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class SubscriptionRenewal extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
         'subscription_id',
         'subscription_plan_id',

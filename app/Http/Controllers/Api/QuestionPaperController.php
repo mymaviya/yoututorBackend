@@ -14,14 +14,76 @@ use Illuminate\Support\Facades\DB;
 
 class QuestionPaperController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $user = auth()->user();
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function ensurePaperAccess(QuestionPaper $paper)
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        if ((int) $paper->subscription_id !== (int) auth()->user()?->subscription_id) {
+            return response()->json([
+                'message' => 'You are not allowed to access this question paper.',
+            ], 403);
+        }
+
+        return null;
+    }
+
+    private function selectedQuestionAccessError(array $paperQuestions): ?array
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        $ids = collect($paperQuestions)
+            ->pluck('question_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return null;
+        }
+
+        $allowedCount = Question::whereIn('id', $ids)->count();
+
+        if ($allowedCount !== $ids->count()) {
+            return [
+                'message' => 'One or more selected questions do not belong to your subscription.',
+                'errors' => [
+                    'questions' => ['Invalid question selection for this subscription.'],
+                ],
+            ];
+        }
+
+        return null;
+    }
+
     public function index()
     {
-        return QuestionPaper::with([
+        $query = QuestionPaper::with([
             'grade',
             'subject',
             'examName',
             'questions.question',
-        ])
+        ]);
+
+        $user = auth()->user();
+        $userRole = $user->roleData?->slug ?? $user->role;
+
+        if (!in_array($userRole, ['superadmin', 'super_admin'])) {
+            $query->where('subscription_id', $user->subscription_id);
+        }
+
+        return $query
             ->latest()
             ->paginate(10);
     }
@@ -226,6 +288,10 @@ class QuestionPaperController extends Controller
             return response()->json($validationError, 422);
         }
 
+        if ($questionAccessError = $this->selectedQuestionAccessError($request->questions ?? [])) {
+            return response()->json($questionAccessError, 403);
+        }
+
         if ($request->user()->role === 'teacher') {
             $allowed = $request->user()
                 ->assignments()
@@ -244,6 +310,7 @@ class QuestionPaperController extends Controller
 
         try {
             $paper = QuestionPaper::create([
+                'subscription_id' => auth()->user()?->subscription_id,
                 'title' => $request->title,
                 'exam_type' => $request->exam_type,
                 'duration' => $request->duration,
@@ -251,7 +318,7 @@ class QuestionPaperController extends Controller
                 'grade_id' => $request->grade_id,
                 'subject_id' => $request->subject_id,
                 'paper_blueprint_id' => $request->paper_blueprint_id,
-                'total_marks' => collect($request->questions)->sum(fn ($q) => (float) ($q['marks'] ?? 0)),
+                'total_marks' => collect($request->questions)->sum(fn($q) => (float) ($q['marks'] ?? 0)),
                 'created_by' => auth()->id(),
             ]);
 
@@ -301,6 +368,10 @@ class QuestionPaperController extends Controller
             'questions.question.lesson',
             'questions.question.type',
         ])->findOrFail($id);
+
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
 
         $paper->questions->transform(function ($paperQuestion) {
             $question = $paperQuestion->question;
@@ -360,10 +431,20 @@ class QuestionPaperController extends Controller
             return response()->json($validationError, 422);
         }
 
+        if ($questionAccessError = $this->selectedQuestionAccessError($request->questions ?? [])) {
+            return response()->json($questionAccessError, 403);
+        }
+
         DB::beginTransaction();
 
         try {
             $paper = QuestionPaper::findOrFail($id);
+
+            if ($response = $this->ensurePaperAccess($paper)) {
+                DB::rollBack();
+
+                return $response;
+            }
 
             if ($paper->status !== 'draft') {
                 AuditService::log(
@@ -388,7 +469,7 @@ class QuestionPaperController extends Controller
                 'grade_id' => $request->grade_id,
                 'subject_id' => $request->subject_id,
                 'paper_blueprint_id' => $request->paper_blueprint_id,
-                'total_marks' => collect($request->questions)->sum(fn ($q) => (float) ($q['marks'] ?? 0)),
+                'total_marks' => collect($request->questions)->sum(fn($q) => (float) ($q['marks'] ?? 0)),
                 'created_by' => auth()->id(),
             ]);
 
@@ -433,6 +514,10 @@ class QuestionPaperController extends Controller
     public function destroy($id)
     {
         $paper = QuestionPaper::findOrFail($id);
+
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
 
         if ($paper->status !== 'draft') {
             return response()->json([
@@ -564,6 +649,10 @@ class QuestionPaperController extends Controller
     {
         $paper = QuestionPaper::findOrFail($id);
 
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
+
         if ($paper->status !== 'draft') {
             return response()->json([
                 'message' => 'Paper is already finalized.',
@@ -594,6 +683,10 @@ class QuestionPaperController extends Controller
     {
         $paper = QuestionPaper::findOrFail($id);
 
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
+
         $paper->update([
             'status' => 'draft',
             'finalized_at' => null,
@@ -618,6 +711,10 @@ class QuestionPaperController extends Controller
     {
         $paper = QuestionPaper::findOrFail($id);
 
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
+
         $paper->update([
             'status' => 'printed',
             'printed_at' => now(),
@@ -632,6 +729,10 @@ class QuestionPaperController extends Controller
     public function archive($id)
     {
         $paper = QuestionPaper::findOrFail($id);
+
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
 
         $paper->update([
             'status' => 'archived',

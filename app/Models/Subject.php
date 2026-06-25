@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class Subject extends Model
 {
-    protected $fillable = ['grade_id', 'stream_id', 'name', 'is_active'];
+    use BelongsToSubscription;
+
+    protected $fillable = [
+        'subscription_id','grade_id', 'stream_id', 'name', 'is_active'];
 
     protected $casts = ['is_active' => 'boolean'];
 
@@ -34,4 +38,10 @@ class Subject extends Model
     {
         return $this->hasMany(Question::class);
     }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
 }

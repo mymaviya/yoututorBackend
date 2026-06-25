@@ -6,29 +6,37 @@ use App\Http\Controllers\Controller;
 use App\Models\PaperBlueprint;
 use App\Models\Question;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class AutoPaperGeneratorController extends Controller
 {
-    private function normalize($value): string
-    {
-        return strtolower(trim((string) $value));
-    }
-
     public function generateFromBlueprint(Request $request)
     {
+        $user = $request->user();
+
         $request->validate([
-            'paper_blueprint_id' => 'required|exists:paper_blueprints,id',
+            'paper_blueprint_id' => [
+                'required',
+                Rule::exists('paper_blueprints', 'id')
+                    ->when(
+                        ! $this->isSuperAdmin($user),
+                        fn ($rule) => $rule->where('subscription_id', $user?->subscription_id)
+                    ),
+            ],
             'moderate_mode' => 'nullable|boolean',
         ]);
 
         $moderateMode = $request->boolean('moderate_mode');
 
+        // PaperBlueprint model should use BelongsToSubscription.
+        // The validation above also prevents selecting another school's blueprint ID.
         $blueprint = PaperBlueprint::with([
             'sections.questionType',
             'sections.bloomLevels',
         ])->findOrFail($request->paper_blueprint_id);
 
         $selectedQuestions = collect();
+        $selectedQuestionIds = collect();
         $errors = [];
 
         foreach ($blueprint->sections as $section) {
@@ -36,47 +44,71 @@ class AutoPaperGeneratorController extends Controller
 
             if ($bloomRules->isNotEmpty()) {
                 foreach ($bloomRules as $bloomRule) {
-                    $query = $this->baseQuestionQuery($blueprint, $section, $moderateMode)
-                        ->where('bloom_level', $bloomRule->bloom_level)
-                        ->whereNotIn('id', $selectedQuestions->pluck('id'));
+                    $requiredCount = (int) $bloomRule->calculated_count;
 
-                    $questions = $query
-                        ->inRandomOrder()
-                        ->limit((int) $bloomRule->calculated_count)
-                        ->get();
-
-                    if ($questions->count() < (int) $bloomRule->calculated_count) {
-                        $errors[] = "{$section->section_name} - {$section->questionType?->name} - "
-                            . ucfirst($bloomRule->bloom_level)
-                            . ": required {$bloomRule->calculated_count}, available {$questions->count()}";
+                    if ($requiredCount <= 0) {
+                        continue;
                     }
 
+                    $questions = $this->baseQuestionQuery($blueprint, $section, $moderateMode)
+                        ->where('bloom_level', $bloomRule->bloom_level)
+                        ->when(
+                            $selectedQuestionIds->isNotEmpty(),
+                            fn ($query) => $query->whereNotIn('id', $selectedQuestionIds->all())
+                        )
+                        ->inRandomOrder()
+                        ->limit($requiredCount)
+                        ->get();
+
+                    if ($questions->count() < $requiredCount) {
+                        $errors[] = "{$section->section_name} - {$section->questionType?->name} - "
+                            . ucfirst((string) $bloomRule->bloom_level)
+                            . ": required {$requiredCount}, available {$questions->count()}";
+                    }
+
+                    $selectedQuestionIds = $selectedQuestionIds
+                        ->merge($questions->pluck('id'))
+                        ->unique()
+                        ->values();
+
                     $selectedQuestions = $selectedQuestions->merge(
-                        $questions->map(fn ($question) => $this->formatQuestion($question, $section))
+                        $questions->map(fn (Question $question) => $this->formatQuestion($question, $section))
                     );
                 }
 
                 continue;
             }
 
-            $query = $this->baseQuestionQuery($blueprint, $section, $moderateMode)
-                ->whereNotIn('id', $selectedQuestions->pluck('id'));
+            $requiredCount = (int) $section->question_count;
 
-            $questions = $query
-                ->inRandomOrder()
-                ->limit((int) $section->question_count)
-                ->get();
-
-            if ($questions->count() < (int) $section->question_count) {
-                $errors[] = "{$section->section_name} - {$section->questionType?->name}: required {$section->question_count}, available {$questions->count()}";
+            if ($requiredCount <= 0) {
+                continue;
             }
 
+            $questions = $this->baseQuestionQuery($blueprint, $section, $moderateMode)
+                ->when(
+                    $selectedQuestionIds->isNotEmpty(),
+                    fn ($query) => $query->whereNotIn('id', $selectedQuestionIds->all())
+                )
+                ->inRandomOrder()
+                ->limit($requiredCount)
+                ->get();
+
+            if ($questions->count() < $requiredCount) {
+                $errors[] = "{$section->section_name} - {$section->questionType?->name}: required {$requiredCount}, available {$questions->count()}";
+            }
+
+            $selectedQuestionIds = $selectedQuestionIds
+                ->merge($questions->pluck('id'))
+                ->unique()
+                ->values();
+
             $selectedQuestions = $selectedQuestions->merge(
-                $questions->map(fn ($question) => $this->formatQuestion($question, $section))
+                $questions->map(fn (Question $question) => $this->formatQuestion($question, $section))
             );
         }
 
-        if (!empty($errors)) {
+        if (! empty($errors)) {
             return response()->json([
                 'message' => 'Auto generation failed.',
                 'errors' => [
@@ -93,6 +125,8 @@ class AutoPaperGeneratorController extends Controller
 
     private function baseQuestionQuery(PaperBlueprint $blueprint, $section, bool $moderateMode)
     {
+        // Question model should use BelongsToSubscription.
+        // Global scope automatically applies: questions.subscription_id = auth user subscription_id.
         return Question::with([
                 'type',
                 'options',
@@ -103,8 +137,8 @@ class AutoPaperGeneratorController extends Controller
             ->where('grade_id', $blueprint->grade_id)
             ->where('subject_id', $blueprint->subject_id)
             ->where('question_type_master_id', $section->question_type_master_id)
-            ->when($blueprint->stream_id, fn ($q) => $q->where('stream_id', $blueprint->stream_id))
-            ->when(!$moderateMode && $section->difficulty, fn ($q) => $q->where('difficulty', $section->difficulty));
+            ->when($blueprint->stream_id, fn ($query) => $query->where('stream_id', $blueprint->stream_id))
+            ->when(! $moderateMode && $section->difficulty, fn ($query) => $query->where('difficulty', $section->difficulty));
     }
 
     private function formatQuestion(Question $question, $section): array
@@ -125,5 +159,19 @@ class AutoPaperGeneratorController extends Controller
             'match_pairs' => $question->matchPairs,
             'lesson' => $question->lesson,
         ];
+    }
+
+    private function isSuperAdmin($user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if (method_exists($user, 'isSuperAdmin')) {
+            return (bool) $user->isSuperAdmin();
+        }
+
+        return ($user->role ?? null) === 'super_admin'
+            || ($user->role ?? null) === 'superadmin';
     }
 }

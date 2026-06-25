@@ -2,12 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class InvoicePayment extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
-        'invoice_id',
+        
+        'subscription_id','invoice_id',
         'payment_date',
         'amount',
         'payment_mode',
@@ -26,4 +30,10 @@ class InvoicePayment extends Model
     {
         return $this->belongsTo(User::class, 'received_by');
     }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
 }

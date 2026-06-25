@@ -21,16 +21,20 @@ class QuestionTypesTemplateExport implements FromArray, WithHeadings, ShouldAuto
 
     public function array(): array
     {
-        return Subject::with('grade')
+        return Subject::with(['grade', 'stream'])
+            ->orderBy('grade_id')
+            ->orderBy('stream_id')
+            ->orderBy('name')
             ->get()
-            ->map(function ($subject) {
+            ->map(function (Subject $subject) {
                 return [
-                    $subject->grade?->name,
-                    $subject->grade?->stream ?? '',
+                    $subject->grade?->name ?? '',
+                    $subject->stream?->name ?? '',
                     $subject->name,
                     'MCQ',
                 ];
             })
+            ->values()
             ->toArray();
     }
 }

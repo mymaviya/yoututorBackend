@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class QuestionPaper extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
+        'subscription_id',
         'grade_id',
         'stream_id',
         'subject_id',
@@ -71,5 +75,10 @@ class QuestionPaper extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+    
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
     }
 }

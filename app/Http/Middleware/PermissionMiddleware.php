@@ -8,24 +8,34 @@ use Symfony\Component\HttpFoundation\Response;
 
 class PermissionMiddleware
 {
-    public function handle(
-        Request $request,
-        Closure $next,
-        $permission
-    ): Response {
+    public function handle(Request $request, Closure $next, string $permission): Response
+    {
+        $user = $request->user();
 
-        if (!auth()->check()) {
+        if (! $user) {
             return response()->json([
-                'message' => 'Unauthenticated'
+                'message' => 'Unauthenticated.',
             ], 401);
         }
 
-        if (!auth()->user()->hasPermission($permission)) {
+        if ($this->isSuperAdmin($user)) {
+            return $next($request);
+        }
+
+        if (! $user->hasPermission($permission)) {
             return response()->json([
-                'message' => 'Permission denied'
+                'message' => 'Permission denied.',
+                'permission' => $permission,
             ], 403);
         }
 
         return $next($request);
+    }
+
+    private function isSuperAdmin($user): bool
+    {
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
     }
 }

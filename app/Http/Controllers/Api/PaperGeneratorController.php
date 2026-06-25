@@ -5,23 +5,22 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PaperBlueprint;
 use App\Models\QuestionPaper;
+use App\Services\AuditService;
 use App\Services\AutoPaperGeneratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Models\User;
-use App\Services\AuditService;
 
 class PaperGeneratorController extends Controller
 {
-    public function preview(
-        Request $request,
-        AutoPaperGeneratorService $generator
-    ) {
+    public function preview(Request $request, AutoPaperGeneratorService $generator)
+    {
         $data = $request->validate([
             'paper_blueprint_id' => 'required|exists:paper_blueprints,id',
             'moderate_mode' => 'nullable|boolean',
         ]);
 
+        // PaperBlueprint model must use BelongsToSubscription.
+        // Global scope blocks access to another school's blueprint.
         $blueprint = PaperBlueprint::with([
             'grade',
             'subject',
@@ -54,6 +53,7 @@ class PaperGeneratorController extends Controller
             'moderate_mode' => 'nullable|boolean',
         ]);
 
+        // PaperBlueprint model must use BelongsToSubscription.
         $blueprint = PaperBlueprint::with([
             'grade',
             'subject',
@@ -67,7 +67,7 @@ class PaperGeneratorController extends Controller
             $request->boolean('moderate_mode')
         );
 
-        if (!empty($result['shortages'])) {
+        if (! empty($result['shortages'])) {
             return response()->json([
                 'message' => 'Not enough approved questions available for this blueprint.',
                 'shortages' => $result['shortages'],
@@ -77,6 +77,9 @@ class PaperGeneratorController extends Controller
 
         return DB::transaction(function () use ($data, $blueprint, $result) {
             $paper = QuestionPaper::create([
+                // QuestionPaper model should use BelongsToSubscription.
+                // This explicit value is kept for clarity and safety.
+                'subscription_id' => auth()->user()?->subscription_id,
                 'grade_id' => $blueprint->grade_id,
                 'stream_id' => $blueprint->stream_id,
                 'subject_id' => $blueprint->subject_id,
@@ -117,7 +120,6 @@ class PaperGeneratorController extends Controller
                 null,
                 $paper->toArray(),
                 auth()->id()
-
             );
 
             return response()->json([

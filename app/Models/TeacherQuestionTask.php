@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class TeacherQuestionTask extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
+        'subscription_id',
         'teacher_id',
         'assigned_by',
         'grade_id',
@@ -58,5 +62,10 @@ class TeacherQuestionTask extends Model
     public function questionType()
     {
         return $this->belongsTo(QuestionTypeMaster::class, 'question_type_master_id');
+    }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
     }
 }

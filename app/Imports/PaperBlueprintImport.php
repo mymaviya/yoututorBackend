@@ -9,6 +9,7 @@ use App\Models\QuestionTypeMaster;
 use App\Models\Stream;
 use App\Models\Subject;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Support\Collection;
@@ -37,6 +38,18 @@ class PaperBlueprintImport implements ToCollection
             'created' => $this->created,
             'skipped' => $this->skipped,
             'errors' => $this->errors,
+        ];
+    }
+
+
+    private function subscriptionPayload(string $table): array
+    {
+        if (!auth()->check() || !Schema::hasColumn($table, 'subscription_id')) {
+            return [];
+        }
+
+        return [
+            'subscription_id' => auth()->user()->subscription_id,
         ];
     }
 
@@ -118,7 +131,7 @@ class PaperBlueprintImport implements ToCollection
                 continue;
             }
 
-            PaperBlueprint::create([
+            PaperBlueprint::create(array_merge($this->subscriptionPayload('paper_blueprints'), [
                 'name' => $blueprintName,
                 'grade_id' => $grade->id,
                 'stream_id' => $streamId,
@@ -127,7 +140,7 @@ class PaperBlueprintImport implements ToCollection
                 'duration_minutes' => $durationMinutes ?: null,
                 'total_marks' => $totalMarks,
                 'is_active' => true,
-            ]);
+            ]));
 
             $this->created++;
         }

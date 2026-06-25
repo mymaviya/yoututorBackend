@@ -19,6 +19,8 @@ class Subscription extends Model
         'ends_at',
         'is_trial',
         'auto_renew',
+        'school_code',
+        'max_users',    
     ];
 
     protected $casts = [
@@ -60,5 +62,16 @@ class Subscription extends Model
     {
         return $this->hasMany(SubscriptionRenewal::class)
             ->latest();
+    }
+
+    public function users()
+    {
+        return $this->hasMany(User::class);
+    }
+
+    public function adminUsers()
+    {
+        return $this->hasMany(User::class)
+            ->where('role', 'admin');
     }
 }

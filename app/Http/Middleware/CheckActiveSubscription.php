@@ -2,39 +2,53 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\Subscription;
 use Closure;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 class CheckActiveSubscription
 {
-    public function handle(Request $request, Closure $next)
+    public function handle(Request $request, Closure $next): Response
     {
-        $subscription = Subscription::whereIn('status', ['trial', 'active'])
-            ->whereDate('starts_at', '<=', now())
-            ->whereDate('ends_at', '>=', now())
-            ->latest()
-            ->first();
+        $user = $request->user();
 
-        $subscription = Subscription::where('status', 'active')
-            ->orWhere('status', 'trial')
-            ->latest()
-            ->first();
-            
-        $userRole = auth()->user()->roleData?->slug
-            ?? auth()->user()->role;
+        if (! $user) {
+            return response()->json([
+                'message' => 'Unauthenticated.',
+            ], 401);
+        }
 
-        if (in_array($userRole, ['superadmin'])) {
+        if ($this->isSuperAdmin($user)) {
             return $next($request);
         }
 
-        if (!$subscription) {
+        $subscription = $user->subscription?->loadMissing('licenseKey');
+
+        if (! $subscription) {
             return response()->json([
-                'message' => 'Subscription expired.'
+                'success' => false,
+                'message' => 'No active subscription is assigned to your account.',
+                'subscription_expired' => true,
             ], 403);
         }
 
-        if (!$subscription) {
+        if (! in_array($subscription->status, ['trial', 'active'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Your subscription is not active. Please contact support.',
+                'subscription_expired' => true,
+            ], 403);
+        }
+
+        if ($subscription->starts_at && now()->lt($subscription->starts_at)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Your subscription has not started yet.',
+                'subscription_expired' => true,
+            ], 403);
+        }
+
+        if ($subscription->ends_at && now()->gt($subscription->ends_at)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Your subscription or demo period has expired. Please renew your plan.',
@@ -42,15 +56,31 @@ class CheckActiveSubscription
             ], 403);
         }
 
-        if (
-            $subscription->ends_at &&
-            now()->gt($subscription->ends_at)
-        ) {
+        $license = $subscription->licenseKey;
+
+        if (! $license || $license->status !== 'active') {
             return response()->json([
-                'message' => 'Subscription expired.'
+                'success' => false,
+                'message' => 'Your license key is inactive or missing.',
+                'subscription_expired' => true,
+            ], 403);
+        }
+
+        if ($license->expires_at && now()->gt($license->expires_at)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Your license key has expired.',
+                'subscription_expired' => true,
             ], 403);
         }
 
         return $next($request);
+    }
+
+    private function isSuperAdmin($user): bool
+    {
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
     }
 }

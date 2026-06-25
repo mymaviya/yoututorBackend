@@ -3,8 +3,9 @@
 namespace App\Exports;
 
 use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 
-class TeacherImportTemplateExport implements FromArray
+class TeacherImportTemplateExport implements FromArray, ShouldAutoSize
 {
     public function array(): array
     {

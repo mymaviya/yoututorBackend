@@ -8,6 +8,7 @@ use App\Models\Stream;
 use App\Models\Subject;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Maatwebsite\Excel\Concerns\ToCollection;
 
 class LessonImport implements ToCollection
@@ -78,18 +79,30 @@ class LessonImport implements ToCollection
                     continue;
                 }
 
-                Lesson::create([
+                Lesson::create(array_merge($this->subscriptionPayload('lessons'), [
                     'grade_id' => $grade->id,
                     'stream_id' => $lessonStreamId,
                     'subject_id' => $subject->id,
                     'name' => $lessonName,
                     'genre' => $genre ?: null,
                     'is_active' => true,
-                ]);
+                ]));
 
                 $this->created++;
             }
         });
+    }
+
+
+    private function subscriptionPayload(string $table): array
+    {
+        if (!auth()->check() || !Schema::hasColumn($table, 'subscription_id')) {
+            return [];
+        }
+
+        return [
+            'subscription_id' => auth()->user()->subscription_id,
+        ];
     }
 
     private function findSubject(int $gradeId, ?int $streamId, string $subjectName): ?Subject

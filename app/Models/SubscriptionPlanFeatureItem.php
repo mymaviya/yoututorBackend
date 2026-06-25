@@ -13,14 +13,12 @@ class SubscriptionPlanFeatureItem extends Model
     ];
 
     protected $casts = [
+        'subscription_plan_id' => 'integer',
         'is_enabled' => 'boolean',
     ];
 
     public function plan()
     {
-        return $this->belongsTo(
-            SubscriptionPlan::class,
-            'subscription_plan_id'
-        );
+        return $this->belongsTo(SubscriptionPlan::class, 'subscription_plan_id');
     }
 }

@@ -14,9 +14,34 @@ use Illuminate\Support\Facades\Storage;
 use App\Imports\QuestionImport;
 use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use App\Exports\QuestionImportTemplateExport;
+
 
 class QuestionController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $user = auth()->user();
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function ensureQuestionAccess(Question $question)
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        if ((int) $question->subscription_id !== (int) auth()->user()?->subscription_id) {
+            return response()->json([
+                'message' => 'You are not allowed to access this question.',
+            ], 403);
+        }
+
+        return null;
+    }
+
     private function resolveQuestionTypeId(Request $request): ?int
     {
         if ($request->filled('question_type_master_id')) {
@@ -44,6 +69,13 @@ class QuestionController extends Controller
     public function index(Request $request)
     {
         $query = Question::with(['grade', 'stream', 'subject', 'lesson', 'type', 'options', 'languageItems', 'matchPairs', 'creator']);
+
+        $user = auth()->user();
+        $userRole = $user->roleData?->slug ?? $user->role;
+
+        if (!in_array($userRole, ['superadmin', 'super_admin'])) {
+            $query->where('subscription_id', $user->subscription_id);
+        }
 
         $isForPaper = $request->boolean('for_paper');
 
@@ -173,6 +205,7 @@ class QuestionController extends Controller
             }
 
             $question = Question::create([
+                'subscription_id' => auth()->user()->subscription_id,
                 'grade_id' => $data['grade_id'],
                 'stream_id' => $data['stream_id'] ?? null,
                 'subject_id' => $data['subject_id'],
@@ -233,9 +266,12 @@ class QuestionController extends Controller
                 ]);
             }
 
-            User::where('role', 'admin')->get()->each(function ($admin) {
-                notifyUser($admin->id, 'New Question Submitted', 'A new question has been submitted for approval.', 'question_submitted', '/questions/approvals');
-            });
+            User::where('role', 'admin')
+                ->where('subscription_id', auth()->user()?->subscription_id)
+                ->get()
+                ->each(function ($admin) {
+                    notifyUser($admin->id, 'New Question Submitted', 'A new question has been submitted for approval.', 'question_submitted', '/questions/approvals');
+                });
 
             return response()->json([
                 'message' => 'Question created successfully',
@@ -246,12 +282,23 @@ class QuestionController extends Controller
 
     public function show($id)
     {
-        return Question::with(['grade', 'stream', 'subject', 'lesson', 'type', 'options', 'images', 'matchPairs', 'languageItems', 'creator'])->findOrFail($id);
+        $question = Question::with(['grade', 'stream', 'subject', 'lesson', 'type', 'options', 'images', 'matchPairs', 'languageItems', 'creator'])->findOrFail($id);
+
+        if ($response = $this->ensureQuestionAccess($question)) {
+            return $response;
+        }
+
+        return $question;
     }
 
     public function update(Request $request, $id)
     {
         $question = Question::findOrFail($id);
+
+        if ($response = $this->ensureQuestionAccess($question)) {
+            return $response;
+        }
+
         $questionTypeId = $this->resolveQuestionTypeId($request) ?: $question->question_type_master_id;
 
         $data = $request->validate([
@@ -317,7 +364,14 @@ class QuestionController extends Controller
 
     public function destroy($id)
     {
-        Question::findOrFail($id)->delete();
+        $question = Question::findOrFail($id);
+
+        if ($response = $this->ensureQuestionAccess($question)) {
+            return $response;
+        }
+
+        $question->delete();
+
         return response()->json(['message' => 'Question deleted successfully']);
     }
 
@@ -350,51 +404,11 @@ class QuestionController extends Controller
         ]);
     }
 
-    public function downloadTemplate(): StreamedResponse
+    public function downloadTemplate()
     {
-        $rows = [
-            [
-                'Grade',
-                'Stream',
-                'Subject',
-                'Lesson',
-                'Question Type',
-                'Question',
-                'Difficulty',
-                'Bloom Level',
-                'Marks',
-                'Answer',
-                'Options',
-                'Correct Option',
-                'Match Pairs',
-            ],
-            [
-                'Grade 11',
-                'Science',
-                'English Core (301)',
-                'The Portrait of a Lady',
-                'mcq',
-                'Who is the author of The Portrait of a Lady?',
-                'medium',
-                'remember',
-                '1',
-                'Khushwant Singh',
-                'Khushwant Singh|William Wordsworth|A.R. Barton|Marga Minco',
-                'A',
-                '',
-            ],
-        ];
-
-        return response()->streamDownload(function () use ($rows) {
-            $handle = fopen('php://output', 'w');
-
-            foreach ($rows as $row) {
-                fputcsv($handle, $row);
-            }
-
-            fclose($handle);
-        }, 'question_import_template.csv', [
-            'Content-Type' => 'text/csv',
-        ]);
+        return Excel::download(
+            new QuestionImportTemplateExport(),
+            'question_import_template.xlsx'
+        );
     }
 }

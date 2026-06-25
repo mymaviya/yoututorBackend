@@ -9,6 +9,29 @@ use App\Services\AuditService;
 
 class QuestionApprovalController extends Controller
 {
+    private function isSuperAdmin(): bool
+    {
+        $user = auth()->user();
+        $role = $user?->roleData?->slug ?? $user?->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
+    private function ensureQuestionAccess(Question $question)
+    {
+        if ($this->isSuperAdmin()) {
+            return null;
+        }
+
+        if ((int) $question->subscription_id !== (int) auth()->user()?->subscription_id) {
+            return response()->json([
+                'message' => 'You are not allowed to access this question.',
+            ], 403);
+        }
+
+        return null;
+    }
+
     public function index(Request $request)
     {
         $query = Question::with([
@@ -22,6 +45,10 @@ class QuestionApprovalController extends Controller
             'creator',
             'approver'
         ]);
+
+        if (! $this->isSuperAdmin()) {
+            $query->where('subscription_id', auth()->user()?->subscription_id);
+        }
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
@@ -57,6 +84,10 @@ class QuestionApprovalController extends Controller
 
     public function approve(Question $question)
     {
+        if ($response = $this->ensureQuestionAccess($question)) {
+            return $response;
+        }
+
         $question->update([
             'status' => 'approved',
             'approved_by' => auth()->id(),
@@ -89,6 +120,10 @@ class QuestionApprovalController extends Controller
 
     public function reject(Request $request, Question $question)
     {
+        if ($response = $this->ensureQuestionAccess($question)) {
+            return $response;
+        }
+
         $data = $request->validate([
             'rejection_reason' => 'required|string|max:1000',
         ]);

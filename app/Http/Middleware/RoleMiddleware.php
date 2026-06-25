@@ -8,34 +8,30 @@ use Symfony\Component\HttpFoundation\Response;
 
 class RoleMiddleware
 {
-    /**
-     * Handle an incoming request.
-     *
-     * @param  Closure(Request): (Response)  $next
-     */
-    public function handle(Request $request, Closure $next, ...$roles)
+    public function handle(Request $request, Closure $next, ...$roles): Response
     {
         $user = $request->user();
 
-        if (!$user) {
+        if (! $user) {
             return response()->json([
-                'message' => 'Unauthenticated.'
+                'message' => 'Unauthenticated.',
             ], 401);
         }
 
         $user->loadMissing('roleData');
 
-        $userRoleSlug = $user->roleData?->slug
-            ?? $user->role;
+        $userRoleSlug = strtolower(trim($user->roleData?->slug ?? $user->role));
 
-        $userRoleSlug = strtolower(trim($userRoleSlug));
+        if (in_array($userRoleSlug, ['superadmin', 'super_admin'], true)) {
+            return $next($request);
+        }
 
         $allowedRoles = array_map(
-            fn($role) => strtolower(trim($role)),
+            fn ($role) => strtolower(trim($role)),
             $roles
         );
 
-        if (!in_array($userRoleSlug, $allowedRoles)) {
+        if (! in_array($userRoleSlug, $allowedRoles, true)) {
             return response()->json([
                 'message' => 'Unauthorized.',
                 'user_role' => $userRoleSlug,

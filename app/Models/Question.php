@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class Question extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
+        'subscription_id',
         'grade_id',
         'stream_id',
         'subject_id',
@@ -87,5 +91,10 @@ class Question extends Model
     public function languageItems()
     {
         return $this->hasMany(LanguageQuestion::class);
+    }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
     }
 }

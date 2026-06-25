@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -10,11 +11,14 @@ use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
+    use BelongsToSubscription;
+
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
     protected $fillable = [
         'role_id',
+        'subscription_id',
         'name',
         'email',
         'contact',
@@ -113,4 +117,22 @@ class User extends Authenticatable
             $q->where('slug', 'teacher');
         });
     }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
+    public function teacherProfile()
+    {
+        return $this->hasOne(TeacherProfile::class);
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        $role = $this->roleData?->slug ?? $this->role;
+
+        return in_array($role, ['superadmin', 'super_admin'], true);
+    }
+
 }

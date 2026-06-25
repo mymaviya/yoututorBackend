@@ -2,12 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Model;
 
 class Proposal extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
-        'proposal_template_id',
+        
+        'subscription_id','proposal_template_id',
         'proposal_no',
         'client_name',
         'client_email',
@@ -77,4 +81,10 @@ class Proposal extends Model
     {
         return $this->belongsTo(User::class, 'created_by');
     }
+
+    public function subscription()
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
 }
