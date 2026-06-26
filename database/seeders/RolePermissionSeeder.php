@@ -2,72 +2,125 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
-use Illuminate\Database\Seeder;
-use App\Models\Role;
 use App\Models\Permission;
+use App\Models\Role;
+use Illuminate\Database\Seeder;
 
 class RolePermissionSeeder extends Seeder
 {
     public function run(): void
     {
-        // ADMIN → ALL PERMISSIONS
+        /*
+        |--------------------------------------------------------------------------
+        | Super Admin / School Admin
+        |--------------------------------------------------------------------------
+        */
 
-        $admin = Role::where('slug', 'admin')->first();
+        $allPermissionIds = Permission::pluck('id');
 
-        if ($admin) {
+        foreach (['superadmin', 'super_admin', 'admin'] as $roleSlug) {
+            $role = Role::where('slug', $roleSlug)->first();
 
-            $permissions = Permission::pluck('id');
-
-            $admin->permissions()->sync($permissions);
+            if ($role) {
+                $role->permissions()->sync($allPermissionIds);
+            }
         }
 
-        // TEACHER PERMISSIONS
+        /*
+        |--------------------------------------------------------------------------
+        | Teacher
+        |--------------------------------------------------------------------------
+        | Uses current permission slugs from PermissionSeeder / SidebarMenuSeeder.
+        */
 
-        $teacher = Role::where('slug', 'teacher')->first();
+        $this->syncRolePermissions('teacher', [
+            'dashboard.view',
+            'profile.view',
+            'profile.update',
 
-        if ($teacher) {
+            'teacher.dashboard',
+            'teacher.my.tasks',
+            'teacher.exam.portions',
 
-            $teacherPermissions = Permission::whereIn('slug', [
-                'create_questions',
-                'edit_questions',
-                'view_question_bank',
-                'generate_papers',
-                'download_papers',
-                'view_students',
-            ])->pluck('id');
+            'grades.view',
+            'streams.view',
+            'subjects.view',
+            'lessons.view',
 
-            $teacher->permissions()->sync($teacherPermissions);
+            'question.types.view',
+            'questions.view',
+            'questions.create',
+            'questions.edit',
+            'language.questions.edit',
+
+            'papers.view',
+            'papers.create',
+            'papers.edit',
+            'papers.generate',
+
+            'exam.names',
+            'exam.portions',
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Reviewer
+        |--------------------------------------------------------------------------
+        */
+
+        $this->syncRolePermissions('reviewer', [
+            'dashboard.view',
+            'profile.view',
+            'questions.view',
+            'question.approvals',
+            'question.types.view',
+            'grades.view',
+            'subjects.view',
+            'lessons.view',
+        ]);
+
+        /*
+        |--------------------------------------------------------------------------
+        | Principal
+        |--------------------------------------------------------------------------
+        */
+
+        $this->syncRolePermissions('principal', [
+            'dashboard.view',
+            'dashboard.analytics',
+            'profile.view',
+
+            'grades.view',
+            'streams.view',
+            'subjects.view',
+            'lessons.view',
+
+            'questions.view',
+            'question.types.view',
+            'papers.view',
+            'paper.blueprints',
+
+            'teachers.view',
+            'teacher.tasks',
+            'teacher.progress',
+            'teacher.analytics',
+
+            'exam.names',
+            'exam.portions',
+            'basic.reports',
+        ]);
+    }
+
+    private function syncRolePermissions(string $roleSlug, array $permissionSlugs): void
+    {
+        $role = Role::where('slug', $roleSlug)->first();
+
+        if (! $role) {
+            return;
         }
 
-        // REVIEWER PERMISSIONS
+        $permissionIds = Permission::whereIn('slug', $permissionSlugs)->pluck('id');
 
-        $reviewer = Role::where('slug', 'reviewer')->first();
-
-        if ($reviewer) {
-
-            $reviewerPermissions = Permission::whereIn('slug', [
-                'approve_questions',
-                'reject_questions',
-                'view_question_bank',
-            ])->pluck('id');
-
-            $reviewer->permissions()->sync($reviewerPermissions);
-        }
-
-        // PRINCIPAL PERMISSIONS
-
-        $principal = Role::where('slug', 'principal')->first();
-
-        if ($principal) {
-
-            $principalPermissions = Permission::whereIn('slug', [
-                'view_dashboard',
-                'view_analytics',
-                'view_question_bank',
-            ])->pluck('id');
-
-            $principal->permissions()->sync($principalPermissions);
-        }
+        $role->permissions()->sync($permissionIds);
     }
 }

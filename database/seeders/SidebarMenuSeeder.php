@@ -801,7 +801,71 @@ class SidebarMenuSeeder extends Seeder
                 'is_active' => true,
                 'show_in_sidebar' => true,
             ],
-           
+            [
+                'title' => 'Premium Question Bank',
+                'icon' => 'mdi-database-search',
+                'route' => '/master-question-bank',
+                'route_name' => 'master-question-bank.questions',
+                'group_name' => 'Question Bank',
+                'parent_menu' => 'Question Bank',
+                'permission_slug' => 'premium.question.bank.view',
+                'feature_key' => 'premium_question_bank',
+                'role_slug' => null,
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 15,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            [
+                'title' => 'Question Bank Packages',
+                'icon' => 'mdi-package-variant-closed',
+                'route' => '/admin/question-bank-packages',
+                'route_name' => 'admin.question-bank-packages.index',
+                'group_name' => 'SaaS Management',
+                'parent_menu' => 'SaaS Management',
+                'permission_slug' => 'question.bank.packages.manage',
+                'feature_key' => 'saas_management',
+                'role_slug' => 'superadmin',
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 504,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            [
+                'title' => 'Master Questions',
+                'icon' => 'mdi-database-edit',
+                'route' => '/admin/master-questions',
+                'route_name' => 'admin.master-questions.index',
+                'group_name' => 'SaaS Management',
+                'parent_menu' => 'SaaS Management',
+                'permission_slug' => 'master.questions.manage',
+                'feature_key' => 'saas_management',
+                'role_slug' => 'superadmin',
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 505,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            [
+                'title' => 'Question Bank Purchases',
+                'icon' => 'mdi-cart-check',
+                'route' => '/admin/question-bank-purchases',
+                'route_name' => 'admin.question-bank-purchases.index',
+                'group_name' => 'SaaS Management',
+                'parent_menu' => 'SaaS Management',
+                'permission_slug' => 'question.bank.purchases.manage',
+                'feature_key' => 'saas_management',
+                'role_slug' => 'superadmin',
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 506,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+
 
 
 
@@ -939,6 +1003,15 @@ class SidebarMenuSeeder extends Seeder
             'admin.quotations.edit' => 'crm',
             'admin.invoices' => 'crm',
             'admin.invoices.edit' => 'crm',
+
+            //Master Question Bank
+            'master-question-bank.packages' => 'premium_question_bank',
+            'master-question-bank.questions' => 'premium_question_bank',
+            'master-question-bank.import' => 'premium_question_bank',
+
+            'admin.question-bank-packages.index' => 'saas_management',
+            'admin.master-questions.index' => 'saas_management',
+            'admin.question-bank-purchases.index' => 'saas_management',
         ];
 
         foreach ($menus as $menu) {

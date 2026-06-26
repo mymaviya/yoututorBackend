@@ -182,8 +182,61 @@ class PermissionSeeder extends Seeder
 
             ['name' => 'View Invoices', 'slug' => 'invoices.view', 'group_name' => 'CRM & Billing'],
             ['name' => 'Edit Invoices', 'slug' => 'invoices.edit', 'group_name' => 'CRM & Billing'],
-            
+
         ];
+
+
+        $permissions = array_merge($permissions, [
+            // Extra route/menu permissions
+            ['name' => 'View Streams', 'slug' => 'streams.view', 'group_name' => 'Academic'],
+            ['name' => 'Import Lessons', 'slug' => 'lessons.import', 'group_name' => 'Imports'],
+            ['name' => 'Import Questions', 'slug' => 'questions.import', 'group_name' => 'Imports'],
+            ['name' => 'Import Blueprint Excel', 'slug' => 'blueprint.import', 'group_name' => 'Imports'],
+            ['name' => 'View Question Type Templates', 'slug' => 'question.type.templates.view', 'group_name' => 'Question Bank'],
+            ['name' => 'Manage Question Type Templates', 'slug' => 'question.type.templates.manage', 'group_name' => 'Question Bank'],
+            ['name' => 'Generate Paper Preview', 'slug' => 'paper.generator.preview', 'group_name' => 'Papers'],
+            ['name' => 'Generate Paper From Blueprint', 'slug' => 'paper.generator.generate', 'group_name' => 'Papers'],
+            ['name' => 'Manage User Security', 'slug' => 'users.security.manage', 'group_name' => 'Security'],
+            ['name' => 'Manage User Devices', 'slug' => 'user.devices.manage', 'group_name' => 'Security'],
+            ['name' => 'Trust User Devices', 'slug' => 'user.devices.trust', 'group_name' => 'Security'],
+            ['name' => 'Block User Devices', 'slug' => 'user.devices.block', 'group_name' => 'Security'],
+            ['name' => 'CRM Dashboard', 'slug' => 'crm.dashboard', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Create Quotations', 'slug' => 'quotations.create', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Delete Quotations', 'slug' => 'quotations.delete', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Create Invoices', 'slug' => 'invoices.create', 'group_name' => 'CRM & Billing'],
+            ['name' => 'Delete Invoices', 'slug' => 'invoices.delete', 'group_name' => 'CRM & Billing'],
+
+            [
+                'name' => 'View Premium Question Bank',
+                'slug' => 'premium.question.bank.view',
+                'group_name' => 'Premium Question Bank',
+            ],
+            [
+                'name' => 'Import Premium Questions',
+                'slug' => 'premium.question.bank.import',
+                'group_name' => 'Premium Question Bank',
+            ],
+            [
+                'name' => 'Manage Question Bank Packages',
+                'slug' => 'question.bank.packages.manage',
+                'group_name' => 'Premium Question Bank',
+            ],
+            [
+                'name' => 'Manage Master Questions',
+                'slug' => 'master.questions.manage',
+                'group_name' => 'Premium Question Bank',
+            ],
+            [
+                'name' => 'Manage Question Bank Purchases',
+                'slug' => 'question.bank.purchases.manage',
+                'group_name' => 'Premium Question Bank',
+            ],
+        ]);
+
+        $permissions = collect($permissions)
+            ->unique('slug')
+            ->values()
+            ->all();
 
         foreach ($permissions as $permission) {
             $payload = [

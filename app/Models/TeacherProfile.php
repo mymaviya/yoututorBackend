@@ -10,8 +10,8 @@ class TeacherProfile extends Model
     use BelongsToSubscription;
 
     protected $fillable = [
-        
-        'subscription_id','user_id',
+        'user_id',
+        'subscription_id',
         'employee_code',
         'designation',
         'qualification',

@@ -64,6 +64,13 @@ use App\Http\Controllers\Api\QuotationController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\CrmDashboardController;
 
+use App\Http\Controllers\Api\Admin\QuestionBankPackageController;
+use App\Http\Controllers\Api\Admin\MasterQuestionController;
+use App\Http\Controllers\Api\Admin\SubscriptionQuestionBankPurchaseController;
+use App\Http\Controllers\Api\MasterQuestionBankController;
+
+use App\Http\Controllers\Api\TeacherProfileController;
+
 use App\Models\SidebarMenu;
 use App\Models\Stream;
 
@@ -135,8 +142,8 @@ Route::middleware('auth:sanctum')->group(function () {
             ? SidebarMenu::whereNotNull('feature_key')->pluck('feature_key')
             : (
                 $subscription?->plan?->featureItems
-                    ?->where('is_enabled', true)
-                    ->pluck('feature_key')
+                ?->where('is_enabled', true)
+                ->pluck('feature_key')
                 ?? collect()
             );
 
@@ -287,6 +294,14 @@ Route::middleware(['auth:sanctum', 'role:superadmin,super_admin'])
         Route::put('/invoices/{id}/mark-paid', [InvoiceController::class, 'markPaid']);
         Route::put('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
         Route::get('/invoices/{id}/pdf', [InvoiceController::class, 'generatePdf']);
+
+        Route::post('/master-questions/import-to-school', [MasterQuestionController::class, 'importToSchool'])->name('master-questions.import-to-school');
+        Route::get('/master-questions/import-template', [MasterQuestionController::class, 'downloadTemplate'])->name('admin.master-questions.import-template');
+        Route::post('/master-questions/import', [MasterQuestionController::class, 'import'])->name('admin.master-questions.import');
+        Route::apiResource('question-bank-packages', QuestionBankPackageController::class);
+        Route::apiResource('question-bank-purchases', SubscriptionQuestionBankPurchaseController::class)->parameters(['question-bank-purchases' => 'questionBankPurchase',]);
+        Route::apiResource('master-questions', MasterQuestionController::class);
+
     });
 
 /*
@@ -353,6 +368,15 @@ Route::middleware([
         Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit'])
             ->name('exam-portions.submit');
 
+        Route::get('/master-question-bank/packages', [MasterQuestionBankController::class, 'packages'])
+            ->name('master-question-bank.packages');
+
+        Route::get('/master-question-bank/questions', [MasterQuestionBankController::class, 'questions'])
+            ->name('master-question-bank.questions');
+
+        Route::post('/master-question-bank/import', [MasterQuestionBankController::class, 'import'])
+            ->name('master-question-bank.import');
+
         Route::get('/my-assignments', function () {
             $user = auth()->user();
 
@@ -382,8 +406,8 @@ Route::middleware([
                 'is_admin' => false,
                 'grades' => $assignments->pluck('grade')->filter()->unique('id')->values(),
                 'subjects' => $assignments
-                    ->filter(fn ($assignment) => $assignment->subject)
-                    ->map(fn ($assignment) => [
+                    ->filter(fn($assignment) => $assignment->subject)
+                    ->map(fn($assignment) => [
                         'id' => $assignment->subject->id,
                         'name' => $assignment->subject->name,
                         'grade_id' => $assignment->grade_id,
@@ -404,7 +428,7 @@ Route::middleware([
                         'action' => $route->getActionName(),
                     ];
                 })
-                ->filter(fn ($route) => $route['name'])
+                ->filter(fn($route) => $route['name'])
                 ->values();
         })->name('app.routes');
 
@@ -557,6 +581,12 @@ Route::middleware([
 
         Route::get('/blueprint-import/template', [BlueprintImportController::class, 'downloadTemplate'])
             ->name('blueprint.excel');
+
+        Route::get('/teachers/{teacher}/profile', [TeacherProfileController::class, 'show'])
+            ->name('teachers.profile.show');
+
+        Route::put('/teachers/{teacher}/profile', [TeacherProfileController::class, 'update'])
+            ->name('teachers.profile.update');
     });
 
     Route::middleware('role:teacher')->group(function () {
