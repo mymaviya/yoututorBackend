@@ -23,6 +23,9 @@ class Question extends Model
         'answer',
         'explanation',
         'is_active',
+        'is_ai_generated',
+        'ai_generated_question_id',
+        'ai_paper_generation_id',
         'is_featured',
         'created_by',
         'status',
@@ -34,6 +37,7 @@ class Question extends Model
     protected $casts = [
         'marks' => 'decimal:2',
         'is_active' => 'boolean',
+        'is_ai_generated' => 'boolean',
         'is_featured' => 'boolean',
         'approved_at' => 'datetime',
     ];
@@ -96,5 +100,15 @@ class Question extends Model
     public function subscription()
     {
         return $this->belongsTo(Subscription::class);
+    }
+
+    public function aiGeneratedQuestion()
+    {
+        return $this->belongsTo(AiGeneratedQuestion::class, 'ai_generated_question_id');
+    }
+
+    public function aiPaperGeneration()
+    {
+        return $this->belongsTo(AiPaperGeneration::class, 'ai_paper_generation_id');
     }
 }

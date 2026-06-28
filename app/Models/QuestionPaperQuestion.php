@@ -9,13 +9,18 @@ class QuestionPaperQuestion extends Model
     protected $fillable = [
         'question_paper_id',
         'question_id',
+        'ai_generated_question_id',
         'marks',
         'section',
         'instructions',
         'sort_order',
+        'is_ai_generated',
     ];
 
-    protected $casts = ['marks' => 'decimal:2'];
+    protected $casts = [
+        'marks' => 'decimal:2',
+        'is_ai_generated' => 'boolean',
+    ];
 
     public function paper()
     {
@@ -25,5 +30,10 @@ class QuestionPaperQuestion extends Model
     public function question()
     {
         return $this->belongsTo(Question::class);
+    }
+
+    public function aiGeneratedQuestion()
+    {
+        return $this->belongsTo(AiGeneratedQuestion::class, 'ai_generated_question_id');
     }
 }

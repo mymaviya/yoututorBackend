@@ -231,6 +231,28 @@ class PermissionSeeder extends Seeder
                 'slug' => 'question.bank.purchases.manage',
                 'group_name' => 'Premium Question Bank',
             ],
+            [
+                'name' => 'View AI Paper Generator',
+                'slug' => 'ai.paper.generator.index',
+                'group_name' => 'AI Paper Generator',
+            ],
+            [
+                'name' => 'Generate AI Papers',
+                'slug' => 'ai.paper.generator.create',
+                'group_name' => 'AI Paper Generator',
+            ],
+            [
+                'name' => 'Delete AI Papers',
+                'slug' => 'ai.paper.generator.delete',
+                'group_name' => 'AI Paper Generator',
+            ],
+            [
+                'name' => 'Save AI Questions To Question Bank',
+                'slug' => 'ai.paper.generator.save.questions',
+                'group_name' => 'AI Paper Generator',
+            ],
+
+            
         ]);
 
         $permissions = collect($permissions)

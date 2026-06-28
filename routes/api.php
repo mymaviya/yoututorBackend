@@ -67,7 +67,9 @@ use App\Http\Controllers\Api\CrmDashboardController;
 use App\Http\Controllers\Api\Admin\QuestionBankPackageController;
 use App\Http\Controllers\Api\Admin\MasterQuestionController;
 use App\Http\Controllers\Api\Admin\SubscriptionQuestionBankPurchaseController;
-use App\Http\Controllers\Api\MasterQuestionBankController;
+use App\Http\Controllers\Api\Admin\MasterQuestionBankController;
+
+use App\Http\Controllers\Api\AiPaperGeneratorController;
 
 use App\Http\Controllers\Api\TeacherProfileController;
 
@@ -301,7 +303,6 @@ Route::middleware(['auth:sanctum', 'role:superadmin,super_admin'])
         Route::apiResource('question-bank-packages', QuestionBankPackageController::class);
         Route::apiResource('question-bank-purchases', SubscriptionQuestionBankPurchaseController::class)->parameters(['question-bank-purchases' => 'questionBankPurchase',]);
         Route::apiResource('master-questions', MasterQuestionController::class);
-
     });
 
 /*
@@ -364,6 +365,8 @@ Route::middleware([
 
         Route::get('/my-exam-portions', [ExamPortionController::class, 'myPortions'])
             ->name('teacher.exam.portions');
+
+        Route::get('/exam-portions/by-exam/{examNameId}', [ExamPortionController::class, 'byExam']);
 
         Route::post('/exam-portions/{examPortion}/submit', [ExamPortionController::class, 'submit'])
             ->name('exam-portions.submit');
@@ -496,6 +499,8 @@ Route::middleware([
         Route::post('/paper-blueprints/{id}/copy', [PaperBlueprintController::class, 'copy'])
             ->name('paper.blueprints.copy');
 
+        Route::get('/paper-blueprints/list', [PaperBlueprintController::class, 'list',]);
+
         Route::apiResource('paper-blueprints', PaperBlueprintController::class)->names([
             'index' => 'paper.blueprints',
         ]);
@@ -559,34 +564,53 @@ Route::middleware([
             'index' => 'subject-templates',
         ]);
 
-        Route::post('/subject-templates/{subjectTemplate}/apply', [SubjectTemplateController::class, 'apply'])
-            ->name('subject-templates.apply');
+        Route::post('/subject-templates/{subjectTemplate}/apply', [SubjectTemplateController::class, 'apply'])->name('subject-templates.apply');
 
-        Route::get('/question-type-template-masters', [QuestionTypeTemplateController::class, 'masters'])
-            ->name('question-type-template-masters');
+        Route::get('/question-type-template-masters', [QuestionTypeTemplateController::class, 'masters'])->name('question-type-template-masters');
 
         Route::apiResource('question-type-templates', QuestionTypeTemplateController::class);
 
-        Route::post('/question-type-templates/{questionTypeTemplate}/apply', [QuestionTypeTemplateController::class, 'apply'])
-            ->name('question-type-templates.apply');
+        Route::post('/question-type-templates/{questionTypeTemplate}/apply', [QuestionTypeTemplateController::class, 'apply'])->name('question-type-templates.apply');
 
-        Route::post('/blueprint-import/question-type-template', [BlueprintImportController::class, 'importQuestionTypeTemplate'])
-            ->name('blueprint.import.question-type-template');
+        Route::post('/blueprint-import/question-type-template', [BlueprintImportController::class, 'importQuestionTypeTemplate'])->name('blueprint.import.question-type-template');
 
-        Route::post('/blueprint-import/paper-blueprint', [BlueprintImportController::class, 'importPaperBlueprint'])
-            ->name('blueprint.import.paper-blueprint');
+        Route::post('/blueprint-import/paper-blueprint', [BlueprintImportController::class, 'importPaperBlueprint'])->name('blueprint.import.paper-blueprint');
 
-        Route::post('/blueprint-import/all', [BlueprintImportController::class, 'importAll'])
-            ->name('blueprint.import.all');
+        Route::post('/blueprint-import/all', [BlueprintImportController::class, 'importAll'])->name('blueprint.import.all');
 
-        Route::get('/blueprint-import/template', [BlueprintImportController::class, 'downloadTemplate'])
-            ->name('blueprint.excel');
+        Route::get('/blueprint-import/template', [BlueprintImportController::class, 'downloadTemplate'])->name('blueprint.excel');
 
-        Route::get('/teachers/{teacher}/profile', [TeacherProfileController::class, 'show'])
-            ->name('teachers.profile.show');
+        Route::get('/teachers/{teacher}/profile', [TeacherProfileController::class, 'show'])->name('teachers.profile.show');
 
-        Route::put('/teachers/{teacher}/profile', [TeacherProfileController::class, 'update'])
-            ->name('teachers.profile.update');
+        Route::put('/teachers/{teacher}/profile', [TeacherProfileController::class, 'update'])->name('teachers.profile.update');
+
+        Route::apiResource('ai-paper-generations', AiPaperGeneratorController::class);
+
+        Route::get('/ai-paper-generations/{aiPaperGeneration}/progress', [AiPaperGeneratorController::class, 'progress']);
+
+        Route::post('/ai-paper-generations/{aiPaperGeneration}/save-to-question-bank', [
+            AiPaperGeneratorController::class,
+            'saveToQuestionBank',
+        ])->name('ai-paper-generations.save-to-question-bank');
+    });
+
+    Route::middleware(['auth:sanctum'])->group(function () {
+        Route::get('/ai-paper-generations', [AiPaperGeneratorController::class, 'index'])
+            ->name('ai.paper.generator.index');
+
+        Route::post('/ai-paper-generations', [AiPaperGeneratorController::class, 'store'])
+            ->name('ai.paper.generator.create');
+
+        Route::get('/ai-paper-generations/{aiPaperGeneration}', [AiPaperGeneratorController::class, 'show'])
+            ->name('ai.paper.generator.show');
+
+        Route::delete('/ai-paper-generations/{aiPaperGeneration}', [AiPaperGeneratorController::class, 'destroy'])
+            ->name('ai.paper.generator.delete');
+
+        Route::post('/ai-paper-generations/{aiPaperGeneration}/save-to-question-bank', [
+            AiPaperGeneratorController::class,
+            'saveToQuestionBank',
+        ])->name('ai.paper.generator.save.questions');
     });
 
     Route::middleware('role:teacher')->group(function () {

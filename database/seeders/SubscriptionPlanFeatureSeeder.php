@@ -70,6 +70,7 @@ class SubscriptionPlanFeatureSeeder extends Seeder
                 'analytics',
                 'import_export',
                 'premium_question_bank',
+                'ai_paper_generator',
             ],
 
             /**

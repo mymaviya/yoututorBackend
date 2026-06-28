@@ -58,4 +58,19 @@ class MasterQuestion extends Model
     {
         return $this->belongsTo(QuestionTypeMaster::class, 'question_type_master_id');
     }
+
+    public function options()
+    {
+        return $this->hasMany(MasterQuestionOption::class)->orderBy('sort_order');
+    }
+
+    public function matchPairs()
+    {
+        return $this->hasMany(MasterQuestionMatchPair::class)->orderBy('sort_order');
+    }
+
+    public function images()
+    {
+        return $this->hasMany(MasterQuestionImage::class);
+    }
 }

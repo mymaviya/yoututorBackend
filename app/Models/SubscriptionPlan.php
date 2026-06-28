@@ -57,4 +57,14 @@ class SubscriptionPlan extends Model
             ->where('is_enabled', true)
             ->exists();
     }
+
+    public function questionBankPackages()
+    {
+        return $this->belongsToMany(
+            QuestionBankPackage::class,
+            'subscription_plan_question_bank_packages',
+            'subscription_plan_id',
+            'question_bank_package_id'
+        )->withTimestamps();
+    }
 }

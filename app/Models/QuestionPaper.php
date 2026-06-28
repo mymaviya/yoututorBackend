@@ -16,11 +16,13 @@ class QuestionPaper extends Model
         'subject_id',
         'exam_name_id',
         'paper_blueprint_id',
+        'ai_paper_generation_id',
         'title',
         'instructions',
         'total_marks',
         'duration_minutes',
         'status',
+        'is_ai_generated',
         'created_by',
         'finalized_at',
         'finalized_by',
@@ -35,6 +37,7 @@ class QuestionPaper extends Model
         'finalized_at' => 'datetime',
         'printed_at' => 'datetime',
         'archived_at' => 'datetime',
+        'is_ai_generated' => 'boolean',
     ];
 
     public function grade()
@@ -53,13 +56,18 @@ class QuestionPaper extends Model
     }
 
     public function examName()
-{
-    return $this->belongsTo(ExamName::class, 'exam_name_id');
-}
+    {
+        return $this->belongsTo(ExamName::class, 'exam_name_id');
+    }
 
     public function blueprint()
     {
         return $this->belongsTo(PaperBlueprint::class, 'paper_blueprint_id');
+    }
+
+    public function aiGeneration()
+    {
+        return $this->belongsTo(AiPaperGeneration::class, 'ai_paper_generation_id');
     }
 
     public function questions()

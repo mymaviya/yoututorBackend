@@ -1,0 +1,28 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class MasterQuestionOption extends Model
+{
+    protected $fillable = [
+        'master_question_id',
+        'option_text',
+        'option_image',
+        'is_correct',
+        'sort_order',
+    ];
+
+    protected $casts = [
+        'is_correct' => 'boolean',
+    ];
+
+    public function question()
+    {
+        return $this->belongsTo(
+            MasterQuestion::class,
+            'master_question_id'
+        );
+    }
+}

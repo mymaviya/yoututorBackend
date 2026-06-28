@@ -10,6 +10,7 @@ use App\Models\QuestionTypeMaster;
 use App\Models\Stream;
 use App\Models\Subject;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Concerns\ToCollection;
 
 class MasterQuestionImport implements ToCollection
@@ -43,6 +44,9 @@ class MasterQuestionImport implements ToCollection
                 $marks = (float) ($row[9] ?? 1);
                 $answer = trim((string) ($row[10] ?? ''));
                 $explanation = trim((string) ($row[11] ?? ''));
+                $optionsText = trim((string) ($row[12] ?? ''));
+                $correctOption = strtoupper(trim((string) ($row[13] ?? '')));
+                $matchPairsText = trim((string) ($row[14] ?? ''));
 
                 if (
                     (!$this->packageId && !$packageSlug) ||
@@ -137,29 +141,104 @@ class MasterQuestionImport implements ToCollection
                     continue;
                 }
 
-                MasterQuestion::create([
-                    'question_bank_package_id' => $package->id,
-                    'grade_id' => $grade->id,
-                    'stream_id' => $stream?->id,
-                    'subject_id' => $subject->id,
-                    'lesson_id' => $lesson?->id,
-                    'question_type_master_id' => $type->id,
-                    'question' => $question,
-                    'difficulty' => $difficulty ?: 'medium',
-                    'bloom_level' => $bloomLevel ?: null,
-                    'marks' => $marks ?: 1,
-                    'answer' => $answer ?: null,
-                    'explanation' => $explanation ?: null,
-                    'language' => 'en',
-                    'source' => 'platform',
-                    'is_active' => true,
-                ]);
+                DB::transaction(function () use (
+                    $package,
+                    $grade,
+                    $stream,
+                    $subject,
+                    $lesson,
+                    $type,
+                    $question,
+                    $difficulty,
+                    $bloomLevel,
+                    $marks,
+                    $answer,
+                    $explanation,
+                    $optionsText,
+                    $correctOption,
+                    $matchPairsText
+                ) {
+                    $masterQuestion = MasterQuestion::create([
+                        'question_bank_package_id' => $package->id,
+                        'grade_id' => $grade->id,
+                        'stream_id' => $stream?->id,
+                        'subject_id' => $subject->id,
+                        'lesson_id' => $lesson?->id,
+                        'question_type_master_id' => $type->id,
+                        'question' => $question,
+                        'difficulty' => $difficulty ?: 'medium',
+                        'bloom_level' => $bloomLevel ?: null,
+                        'marks' => $marks ?: 1,
+                        'answer' => $answer ?: null,
+                        'explanation' => $explanation ?: null,
+                        'language' => 'en',
+                        'source' => 'platform',
+                        'is_active' => true,
+                    ]);
+
+                    $this->createOptions($masterQuestion, $optionsText, $correctOption);
+                    $this->createMatchPairs($masterQuestion, $matchPairsText);
+                });
 
                 $this->imported++;
             } catch (\Throwable $e) {
                 $this->skipped++;
                 $this->errors[] = "Row {$line}: " . $e->getMessage();
             }
+        }
+    }
+
+    private function createOptions(MasterQuestion $question, string $optionsText, string $correctOption): void
+    {
+        if ($optionsText === '') {
+            return;
+        }
+
+        $options = array_values(array_filter(array_map(
+            fn ($value) => trim((string) $value),
+            explode('|', $optionsText)
+        )));
+
+        foreach ($options as $index => $optionText) {
+            $letter = chr(65 + $index);
+
+            $question->options()->create([
+                'option_text' => $optionText,
+                'option_image' => null,
+                'is_correct' => $correctOption === $letter || $correctOption === (string) ($index + 1),
+                'sort_order' => $index,
+            ]);
+        }
+    }
+
+    private function createMatchPairs(MasterQuestion $question, string $matchPairsText): void
+    {
+        if ($matchPairsText === '') {
+            return;
+        }
+
+        $pairs = array_values(array_filter(array_map(
+            fn ($value) => trim((string) $value),
+            explode('|', $matchPairsText)
+        )));
+
+        foreach ($pairs as $index => $pair) {
+            if (!str_contains($pair, '=')) {
+                $this->errors[] = "Match pair '{$pair}' is invalid. Use Left=Right format.";
+                continue;
+            }
+
+            [$left, $right] = array_map('trim', explode('=', $pair, 2));
+
+            if ($left === '' || $right === '') {
+                continue;
+            }
+
+            $question->matchPairs()->create([
+                'left_value' => $left,
+                'right_value' => $right,
+                'sort_order' => $index,
+            ]);
         }
     }
 }

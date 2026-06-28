@@ -2,27 +2,36 @@
 
 namespace App\Http\Controllers\Api\Admin;
 
+use App\Exports\MasterQuestionImportTemplateExport;
 use App\Http\Controllers\Controller;
+use App\Imports\MasterQuestionImport;
 use App\Models\MasterQuestion;
 use App\Models\Question;
+use App\Models\QuestionImage;
+use App\Models\QuestionMatchPair;
+use App\Models\QuestionOption;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Exports\MasterQuestionImportTemplateExport;
-use App\Imports\MasterQuestionImport;
+use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 
 class MasterQuestionController extends Controller
 {
+    private array $withRelations = [
+        'package',
+        'grade',
+        'stream',
+        'subject',
+        'lesson',
+        'type',
+        'options',
+        'matchPairs',
+        'images',
+    ];
+
     public function index(Request $request)
     {
-        $query = MasterQuestion::with([
-            'package',
-            'grade',
-            'stream',
-            'subject',
-            'lesson',
-            'type',
-        ]);
+        $query = MasterQuestion::with($this->withRelations);
 
         if ($request->filled('question_bank_package_id')) {
             $query->where('question_bank_package_id', $request->question_bank_package_id);
@@ -76,37 +85,36 @@ class MasterQuestionController extends Controller
     {
         $data = $this->validatedData($request);
 
-        $question = MasterQuestion::create($data + [
-            'source' => 'platform',
-            'is_active' => $data['is_active'] ?? true,
-        ]);
+        $question = DB::transaction(function () use ($request, $data) {
+            $question = MasterQuestion::create($data + [
+                'source' => 'platform',
+                'is_active' => $request->boolean('is_active', true),
+            ]);
+
+            $this->syncOptions($request, $question);
+            $this->syncMatchPairs($request, $question);
+            $this->syncImages($request, $question);
+
+            return $question;
+        });
 
         return response()->json([
             'success' => true,
             'message' => 'Master question created successfully.',
-            'data' => $question->load([
-                'package',
-                'grade',
-                'stream',
-                'subject',
-                'lesson',
-                'type',
-            ]),
+            'data' => $question->fresh()->load($this->withRelations),
         ], 201);
     }
 
     public function show(MasterQuestion $masterQuestion)
     {
+        $masterQuestion->load($this->withRelations);
+
+        $data = $masterQuestion->toArray();
+        $data['question_image'] = $masterQuestion->images->first()?->image_path;
+
         return response()->json([
             'success' => true,
-            'data' => $masterQuestion->load([
-                'package',
-                'grade',
-                'stream',
-                'subject',
-                'lesson',
-                'type',
-            ]),
+            'data' => $data,
         ]);
     }
 
@@ -114,19 +122,20 @@ class MasterQuestionController extends Controller
     {
         $data = $this->validatedData($request);
 
-        $masterQuestion->update($data);
+        DB::transaction(function () use ($request, $masterQuestion, $data) {
+            $masterQuestion->update($data + [
+                'is_active' => $request->boolean('is_active', $masterQuestion->is_active),
+            ]);
+
+            $this->syncOptions($request, $masterQuestion);
+            $this->syncMatchPairs($request, $masterQuestion);
+            $this->syncImages($request, $masterQuestion);
+        });
 
         return response()->json([
             'success' => true,
             'message' => 'Master question updated successfully.',
-            'data' => $masterQuestion->fresh()->load([
-                'package',
-                'grade',
-                'stream',
-                'subject',
-                'lesson',
-                'type',
-            ]),
+            'data' => $masterQuestion->fresh()->load($this->withRelations),
         ]);
     }
 
@@ -155,7 +164,8 @@ class MasterQuestionController extends Controller
             ], 403);
         }
 
-        $masterQuestions = MasterQuestion::whereIn('id', $data['master_question_ids'])
+        $masterQuestions = MasterQuestion::with(['options', 'matchPairs', 'images'])
+            ->whereIn('id', $data['master_question_ids'])
             ->where('is_active', true)
             ->get();
 
@@ -178,7 +188,7 @@ class MasterQuestionController extends Controller
                     continue;
                 }
 
-                Question::create([
+                $question = Question::create([
                     'subscription_id' => $subscriptionId,
                     'grade_id' => $masterQuestion->grade_id,
                     'stream_id' => $masterQuestion->stream_id,
@@ -197,6 +207,32 @@ class MasterQuestionController extends Controller
                     'created_by' => auth()->id(),
                     'is_active' => true,
                 ]);
+
+                foreach ($masterQuestion->options as $option) {
+                    QuestionOption::create([
+                        'question_id' => $question->id,
+                        'option_text' => $option->option_text,
+                        'option_image' => $option->option_image,
+                        'is_correct' => $option->is_correct,
+                        'sort_order' => $option->sort_order,
+                    ]);
+                }
+
+                foreach ($masterQuestion->matchPairs as $pair) {
+                    QuestionMatchPair::create([
+                        'question_id' => $question->id,
+                        'left_value' => $pair->left_value,
+                        'right_value' => $pair->right_value,
+                        'sort_order' => $pair->sort_order,
+                    ]);
+                }
+
+                foreach ($masterQuestion->images as $image) {
+                    QuestionImage::create([
+                        'question_id' => $question->id,
+                        'image_path' => $image->image_path,
+                    ]);
+                }
 
                 $created++;
             }
@@ -259,6 +295,92 @@ class MasterQuestionController extends Controller
 
             'language' => ['nullable', 'string', 'max:20'],
             'is_active' => ['nullable', 'boolean'],
+
+            'options' => ['nullable', 'array'],
+            'options.*.id' => ['nullable', 'exists:master_question_options,id'],
+            'options.*.option_text' => ['nullable', 'string'],
+            'options.*.option_image' => ['nullable', 'image', 'max:4096'],
+            'options.*.old_option_image' => ['nullable', 'string'],
+            'options.*.is_correct' => ['nullable', 'boolean'],
+
+            'matches' => ['nullable'],
+            'question_image' => ['nullable', 'image', 'max:4096'],
+        ]);
+    }
+
+    private function syncOptions(Request $request, MasterQuestion $question): void
+    {
+        if (!$request->has('options')) {
+            return;
+        }
+
+        $question->options()->delete();
+
+        foreach ($request->input('options', []) as $index => $option) {
+            $optionText = trim((string) ($option['option_text'] ?? ''));
+            $imagePath = $option['old_option_image'] ?? null;
+
+            if ($request->hasFile("options.{$index}.option_image")) {
+                $imagePath = $request->file("options.{$index}.option_image")
+                    ->store('master-question-options', 'public');
+            }
+
+            if ($optionText === '' && !$imagePath) {
+                continue;
+            }
+
+            $question->options()->create([
+                'option_text' => $optionText,
+                'option_image' => $imagePath,
+                'is_correct' => (bool) ($option['is_correct'] ?? false),
+                'sort_order' => $index,
+            ]);
+        }
+    }
+
+    private function syncMatchPairs(Request $request, MasterQuestion $question): void
+    {
+        if (!$request->filled('matches')) {
+            return;
+        }
+
+        $matches = $request->input('matches');
+
+        if (is_string($matches)) {
+            $matches = json_decode($matches, true) ?: [];
+        }
+
+        $question->matchPairs()->delete();
+
+        foreach ($matches as $index => $match) {
+            $leftValue = trim((string) ($match['left'] ?? $match['left_value'] ?? ''));
+            $rightValue = trim((string) ($match['right'] ?? $match['right_value'] ?? ''));
+
+            if ($leftValue === '' && $rightValue === '') {
+                continue;
+            }
+
+            $question->matchPairs()->create([
+                'left_value' => $leftValue,
+                'right_value' => $rightValue,
+                'sort_order' => $index,
+            ]);
+        }
+    }
+
+    private function syncImages(Request $request, MasterQuestion $question): void
+    {
+        if (!$request->hasFile('question_image')) {
+            return;
+        }
+
+        $path = $request->file('question_image')
+            ->store('master-question-images', 'public');
+
+        $question->images()->delete();
+
+        $question->images()->create([
+            'image_path' => $path,
         ]);
     }
 }

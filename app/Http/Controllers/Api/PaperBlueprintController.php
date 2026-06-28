@@ -410,8 +410,6 @@ class PaperBlueprintController extends Controller
             ->when($blueprint->stream_id, fn($q) => $q->where('stream_id', $blueprint->stream_id))
             ->when($section->difficulty, fn($q) => $q->where('difficulty', $section->difficulty))
             ->count();
-
-        
     }
 
     private function calculateTotalQuestions(array $sections): int
@@ -466,5 +464,24 @@ class PaperBlueprintController extends Controller
         }
 
         return null;
+    }
+
+    public function list()
+    {
+        return response()->json([
+            'success' => true,
+            'data' => PaperBlueprint::where(
+                'subscription_id',
+                auth()->user()->subscription_id
+            )
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get([
+                    'id',
+                    'name',
+                    'grade_id',
+                    'subject_id',
+                ]),
+        ]);
     }
 }

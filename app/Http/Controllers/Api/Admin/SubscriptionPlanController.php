@@ -13,7 +13,10 @@ class SubscriptionPlanController extends Controller
 {
     public function index(Request $request)
     {
-        $query = SubscriptionPlan::with('featureItems');
+        $query = SubscriptionPlan::with([
+            'featureItems',
+            'questionBankPackages',
+        ]);
 
         if ($request->filled('status')) {
             $query->where('is_active', $request->status === 'active');
@@ -52,7 +55,12 @@ class SubscriptionPlanController extends Controller
             $validated['sort_order'] = $validated['sort_order'] ?? 0;
 
             $featureItems = $validated['feature_items'] ?? [];
-            unset($validated['feature_items']);
+            $questionBankPackageIds = $validated['question_bank_package_ids'] ?? [];
+
+            unset(
+                $validated['feature_items'],
+                $validated['question_bank_package_ids']
+            );
 
             if ($validated['is_popular']) {
                 SubscriptionPlan::where('is_popular', true)->update([
@@ -63,11 +71,15 @@ class SubscriptionPlanController extends Controller
             $plan = SubscriptionPlan::create($validated);
 
             $this->syncFeatureItems($plan, $featureItems);
+            $this->syncQuestionBankPackages($plan, $questionBankPackageIds);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Subscription plan created successfully.',
-                'data' => $plan->load('featureItems'),
+                'data' => $plan->load([
+                    'featureItems',
+                    'questionBankPackages',
+                ]),
             ], 201);
         });
     }
@@ -76,7 +88,10 @@ class SubscriptionPlanController extends Controller
     {
         return response()->json([
             'success' => true,
-            'data' => $subscriptionPlan->load('featureItems'),
+            'data' => $subscriptionPlan->load([
+                'featureItems',
+                'questionBankPackages',
+            ]),
         ]);
     }
 
@@ -95,7 +110,12 @@ class SubscriptionPlanController extends Controller
             $validated['sort_order'] = $validated['sort_order'] ?? 0;
 
             $featureItems = $validated['feature_items'] ?? [];
-            unset($validated['feature_items']);
+            $questionBankPackageIds = $validated['question_bank_package_ids'] ?? [];
+
+            unset(
+                $validated['feature_items'],
+                $validated['question_bank_package_ids']
+            );
 
             if ($validated['is_popular']) {
                 SubscriptionPlan::where('id', '!=', $subscriptionPlan->id)
@@ -108,11 +128,15 @@ class SubscriptionPlanController extends Controller
             $subscriptionPlan->update($validated);
 
             $this->syncFeatureItems($subscriptionPlan, $featureItems);
+            $this->syncQuestionBankPackages($subscriptionPlan, $questionBankPackageIds);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Subscription plan updated successfully.',
-                'data' => $subscriptionPlan->fresh()->load('featureItems'),
+                'data' => $subscriptionPlan->fresh()->load([
+                    'featureItems',
+                    'questionBankPackages',
+                ]),
             ]);
         });
     }
@@ -127,6 +151,7 @@ class SubscriptionPlanController extends Controller
         }
 
         $subscriptionPlan->featureItems()->delete();
+        $subscriptionPlan->questionBankPackages()->detach();
         $subscriptionPlan->delete();
 
         return response()->json([
@@ -152,9 +177,14 @@ class SubscriptionPlanController extends Controller
             'trial_days' => 'nullable|integer|min:0',
             'features' => 'nullable|array',
             'features.*' => 'nullable|string|max:255',
+
             'feature_items' => 'nullable|array',
             'feature_items.*.feature_key' => 'required_with:feature_items|string|max:100',
             'feature_items.*.is_enabled' => 'nullable|boolean',
+
+            'question_bank_package_ids' => 'nullable|array',
+            'question_bank_package_ids.*' => 'integer|exists:question_bank_packages,id',
+
             'is_trial' => 'boolean',
             'is_popular' => 'boolean',
             'is_active' => 'boolean',
@@ -191,5 +221,17 @@ class SubscriptionPlanController extends Controller
                 ['is_enabled' => $item['is_enabled']]
             );
         }
+    }
+
+    private function syncQuestionBankPackages(SubscriptionPlan $plan, array $packageIds): void
+    {
+        $ids = collect($packageIds)
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $plan->questionBankPackages()->sync($ids);
     }
 }

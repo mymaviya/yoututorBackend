@@ -10,7 +10,7 @@ class ExamPortionLesson extends Model
         'exam_portion_id',
         'lesson_id',
         'topics',
-        'objectives',
+        'learning_objectives',
         'remarks',
     ];
 

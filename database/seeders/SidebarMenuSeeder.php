@@ -865,7 +865,40 @@ class SidebarMenuSeeder extends Seeder
                 'is_active' => true,
                 'show_in_sidebar' => true,
             ],
-
+            [
+                'title' => 'AI Paper Generator',
+                'icon' => 'mdi-robot',
+                'route' => '/paper-generator/ai',
+                'route_name' => 'ai.paper.generator.index',
+                'group_name' => 'Papers',
+                'parent_menu' => 'Papers',
+                'permission_slug' => 'ai.paper.generator.index',
+                'feature_key' => 'ai_paper_generator',
+                'role_slug' => null,
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 315,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            [
+                'title' => 'AI Paper Generator',
+                'icon' => 'mdi-robot',
+                'route' => '/admin/ai-paper-generations',
+                'route_name' => 'admin.ai-paper-generations.index',
+                'group_name' => 'Question Papers',
+                'parent_menu' => 'Question Papers',
+                'permission_slug' => 'admin.ai.paper.generator.manage',
+                'feature_key' => 'ai_paper_generator',
+                'role_slug' => 'superadmin',
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 610,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            
+            
 
 
 
