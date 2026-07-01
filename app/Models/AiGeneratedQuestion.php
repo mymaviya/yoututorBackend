@@ -30,6 +30,7 @@ class AiGeneratedQuestion extends Model
         'is_selected',
         'saved_to_question_bank',
         'question_id',
+        'regenerated_preview',
     ];
 
     protected $casts = [
@@ -40,6 +41,7 @@ class AiGeneratedQuestion extends Model
         'sort_order' => 'integer',
         'is_selected' => 'boolean',
         'saved_to_question_bank' => 'boolean',
+        'regenerated_preview' => 'array',
     ];
 
     public function generation()

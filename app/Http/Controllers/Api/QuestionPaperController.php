@@ -9,8 +9,10 @@ use App\Models\QuestionPaper;
 use App\Models\QuestionPaperQuestion;
 use App\Models\QuestionTypeMaster;
 use App\Services\AuditService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class QuestionPaperController extends Controller
 {
@@ -539,6 +541,203 @@ class QuestionPaperController extends Controller
         return response()->json([
             'message' => 'Question paper deleted successfully',
         ]);
+    }
+
+
+    private function loadPaperForExport($id): QuestionPaper
+    {
+        return QuestionPaper::with([
+            'grade',
+            'stream',
+            'subject',
+            'examName',
+            'blueprint',
+            'subscription',
+            'questions.question.options',
+            'questions.question.matchPairs',
+            'questions.question.lesson',
+            'questions.question.type',
+        ])->findOrFail($id);
+    }
+
+    private function wordDownloadResponse(string $html, string $filename)
+    {
+        return response($html, 200, [
+            'Content-Type' => 'application/msword; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Cache-Control' => 'max-age=0',
+        ]);
+    }
+
+    private function pdfDownloadResponse(string $html, string $filename)
+    {
+        if (! class_exists(Pdf::class)) {
+            return response()->json([
+                'message' => 'PDF package is not installed. Please install barryvdh/laravel-dompdf.',
+            ], 500);
+        }
+
+        $pdf = Pdf::loadHTML($html)
+            ->setPaper('a4', 'portrait');
+
+        return $pdf->download($filename);
+    }
+
+    public function exportPdf($id)
+    {
+        $paper = $this->loadPaperForExport($id);
+
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
+
+        $filename = Str::slug($paper->title ?: 'question-paper') . '.pdf';
+
+        return $this->pdfDownloadResponse(
+            $this->buildQuestionPaperHtml($paper, false),
+            $filename
+        );
+    }
+
+    public function exportAnswerKeyPdf($id)
+    {
+        $paper = $this->loadPaperForExport($id);
+
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
+
+        $filename = Str::slug(($paper->title ?: 'question-paper') . '-answer-key') . '.pdf';
+
+        return $this->pdfDownloadResponse(
+            $this->buildAnswerKeyHtml($paper),
+            $filename
+        );
+    }
+
+    public function exportWord($id)
+    {
+        $paper = $this->loadPaperForExport($id);
+
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
+
+        $filename = Str::slug($paper->title ?: 'question-paper') . '.doc';
+
+        return $this->wordDownloadResponse(
+            $this->buildQuestionPaperHtml($paper, false),
+            $filename
+        );
+    }
+
+    public function exportAnswerKeyWord($id)
+    {
+        $paper = $this->loadPaperForExport($id);
+
+        if ($response = $this->ensurePaperAccess($paper)) {
+            return $response;
+        }
+
+        $filename = Str::slug(($paper->title ?: 'question-paper') . '-answer-key') . '.doc';
+
+        return $this->wordDownloadResponse(
+            $this->buildAnswerKeyHtml($paper),
+            $filename
+        );
+    }
+
+    private function buildQuestionPaperHtml(QuestionPaper $paper, bool $includeAnswers = false): string
+    {
+        return view('pdf.question-paper', [
+            'paper' => $paper,
+            'school' => $this->schoolHeaderDetails($paper),
+            'includeAnswers' => $includeAnswers,
+            'exportMode' => 'html',
+        ])->render();
+    }
+
+    private function buildAnswerKeyHtml(QuestionPaper $paper): string
+    {
+        return view('pdf.answer-key', [
+            'paper' => $paper,
+            'school' => $this->schoolHeaderDetails($paper),
+            'exportMode' => 'html',
+        ])->render();
+    }
+
+    private function schoolHeaderDetails(QuestionPaper $paper): array
+    {
+        $subscription = $paper->subscription ?? auth()->user()?->subscription;
+
+        $logo = $subscription->logo
+            ?? $subscription->logo_path
+            ?? $subscription->school_logo
+            ?? config('app.school_logo')
+            ?? env('SCHOOL_LOGO');
+
+        $logoPath = null;
+
+        if ($logo) {
+            $logo = ltrim((string) $logo, '/');
+
+            $possiblePaths = [
+                public_path($logo),
+                public_path('storage/' . $logo),
+                storage_path('app/public/' . $logo),
+            ];
+
+            foreach ($possiblePaths as $path) {
+                if ($path && file_exists($path)) {
+                    $logoPath = $path;
+                    break;
+                }
+            }
+        }
+
+        return [
+            'name' => $subscription->school_name
+                ?? $subscription->name
+                ?? config('app.school_name')
+                ?? env('SCHOOL_NAME', 'SCHOOL NAME'),
+            'address' => $subscription->address
+                ?? $subscription->school_address
+                ?? config('app.school_address')
+                ?? env('SCHOOL_ADDRESS', 'School Address'),
+            'phone' => $subscription->phone
+                ?? $subscription->contact
+                ?? $subscription->mobile
+                ?? config('app.school_phone')
+                ?? env('SCHOOL_PHONE'),
+            'email' => $subscription->email
+                ?? config('app.school_email')
+                ?? env('SCHOOL_EMAIL'),
+            'logo_path' => $logoPath,
+        ];
+    }
+
+    private function formatMarks($marks): string
+    {
+        $value = (float) $marks;
+
+        return fmod($value, 1.0) === 0.0
+            ? (string) (int) $value
+            : rtrim(rtrim(number_format($value, 2), '0'), '.');
+    }
+
+    private function pairValue($pair, string $side): string
+    {
+        if ($side === 'left') {
+            return $pair->left_value
+                ?? $pair->left_text
+                ?? $pair->left
+                ?? '';
+        }
+
+        return $pair->right_value
+            ?? $pair->right_text
+            ?? $pair->right
+            ?? '';
     }
 
     public function autoGenerate(Request $request)

@@ -833,4 +833,139 @@ class AiPaperGeneratorService
             JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE
         );
     }
+
+    public function regenerateQuestionPreview(AiGeneratedQuestion $question): AiGeneratedQuestion
+    {
+        $question->load([
+            'generation',
+            'lesson',
+            'type',
+        ]);
+
+        $generation = $question->generation;
+
+        if (! $generation) {
+            throw new RuntimeException('AI generation not found for this question.');
+        }
+
+        if ((bool) $question->saved_to_question_bank) {
+            throw new RuntimeException('This AI question is already saved to Question Bank. Please edit it from Question Bank.');
+        }
+
+        $blueprint = PaperBlueprint::with([
+            'grade',
+            'stream',
+            'subject',
+            'examName',
+            'sections.questionType',
+            'sections.bloomLevels',
+        ])->findOrFail($generation->paper_blueprint_id);
+
+        $examPortion = $this->resolveExamPortion(
+            $generation,
+            $blueprint
+        );
+
+        $sectionIndex = (int) $question->section_index;
+
+        $section = $blueprint->sections
+            ->values()
+            ->get($sectionIndex);
+
+        if (! $section) {
+            throw new RuntimeException('Question section not found.');
+        }
+
+        $prompt = $this->buildMissingQuestionsPrompt(
+            $blueprint,
+            $generation,
+            $examPortion,
+            $section,
+            $sectionIndex,
+            1,
+            [
+                [
+                    'question' => $question->question,
+                ],
+            ],
+            'Generate one replacement question. Do not repeat the old question.'
+        );
+
+        $response = $this->callAi($prompt);
+
+        $questions = $this->normalizeQuestions($response);
+
+        $newQuestion = $questions[0] ?? null;
+
+        if (! $newQuestion) {
+            throw new RuntimeException('AI did not generate a replacement question.');
+        }
+
+        $this->validateSectionQuestions(
+            [$newQuestion],
+            (object) [
+                'question_count' => 1,
+                'marks_per_question' => $section->marks_per_question,
+                'question_type_master_id' => $section->question_type_master_id,
+                'questionType' => $section->questionType,
+            ],
+            $sectionIndex,
+            $examPortion
+        );
+
+        $question->update([
+            'regenerated_preview' => $newQuestion,
+        ]);
+
+        return $question->fresh([
+            'lesson',
+            'type',
+        ]);
+    }
+
+    public function acceptRegeneratedQuestion(AiGeneratedQuestion $question): AiGeneratedQuestion
+    {
+        $question->load([
+            'generation',
+            'lesson',
+            'type',
+        ]);
+
+        $generation = $question->generation;
+
+        if (! $generation) {
+            throw new RuntimeException('AI generation not found for this question.');
+        }
+
+        if ((bool) $question->saved_to_question_bank) {
+            throw new RuntimeException('This AI question is already saved to Question Bank. Please edit it from Question Bank.');
+        }
+
+        $preview = $question->regenerated_preview;
+
+        if (! is_array($preview)) {
+            throw new RuntimeException('No regenerated question preview found.');
+        }
+
+        $question->update([
+            'question' => $preview['question'],
+            'answer' => $preview['answer'] ?? null,
+            'explanation' => $preview['explanation'] ?? null,
+            'difficulty' => $preview['difficulty'] ?? $question->difficulty,
+            'bloom_level' => $preview['bloom_level'] ?? $question->bloom_level,
+            'marks' => $preview['marks'] ?? $question->marks,
+            'lesson_id' => $preview['lesson_id'] ?? $question->lesson_id,
+            'options' => $preview['options'] ?? null,
+            'match_pairs' => $preview['match_pairs'] ?? null,
+            'saved_to_question_bank' => false,
+            'question_id' => null,
+            'regenerated_preview' => null,
+        ]);
+
+        return $question->fresh([
+            'lesson',
+            'type',
+        ]);
+    }
+
 }

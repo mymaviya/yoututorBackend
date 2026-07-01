@@ -6,24 +6,7 @@
 
     <style>
         @page {
-            margin: 10mm 13mm 22mm 13mm;
-        }
-
-        .first-page-header {
-            text-align: center;
-            border-bottom: 1px solid #000;
-            padding-bottom: 1px;
-            margin-bottom: 1px;
-        }
-
-        .school-name {
-            font-size: 16px;
-            font-weight: bold;
-            text-transform: uppercase;
-        }
-
-        .school-details {
-            font-size: 11px;
+            margin: 16mm 13mm;
         }
 
         * {
@@ -49,14 +32,6 @@
             font-size: 21px;
             font-weight: bold;
             text-transform: uppercase;
-        }
-
-        .paper-header h4 {
-            margin: 3px 0 8px;
-            font-size: 14px;
-            font-weight: bold;
-            text-transform: uppercase;
-            text-decoration: none;
         }
 
         .paper-meta {
@@ -167,10 +142,9 @@
 
         .mcq-options td {
             vertical-align: top;
-            padding: 2px 18px 2px 0;
+            padding: 2px 10px 2px 0;
             line-height: 1.12;
             font-size: 13.5px;
-            word-break: normal;
         }
 
         .mcq-options.four-column td {
@@ -183,6 +157,10 @@
 
         .mcq-options.two-column td {
             width: 50%;
+        }
+
+        .mcq-options.one-column td {
+            width: 100%;
         }
 
         .option-label {
@@ -223,72 +201,13 @@
         tr {
             page-break-inside: avoid;
         }
-
-
-
-        .pdf-header-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        .pdf-header-table td {
-            vertical-align: middle;
-        }
-
-        .school-logo-cell {
-            width: 68px;
-            text-align: left;
-        }
-
-        .school-logo {
-            max-width: 55px;
-            max-height: 55px;
-        }
-
-        .school-info-cell {
-            text-align: center;
-            padding-right: 68px;
-        }
-
-        .school-address {
-            font-size: 11.5px;
-            line-height: 1.2;
-            margin-top: 3px;
-        }
     </style>
 </head>
 
 <body>
 
-    <div class="first-page-header">
-        <div class="school-name">
-            {{ $schoolName ?? 'SIDDHARTH PUBLIC SCHOOL' }}
-        </div>
-
-        <div class="school-details">
-            {{ $schoolAddress ?? 'School Address' }}
-            @if(!empty($schoolPhone))
-            | Phone: {{ $schoolPhone }}
-            @endif
-            @if(!empty($schoolEmail))
-            | Email: {{ $schoolEmail }}
-            @endif
-        </div>
-    </div>
-
-
-
     <div class="paper-header">
-        <h4>
-            {{ strtoupper($paper->examName?->name ?? $paper->exam_type ?? 'QUESTION PAPER') }}
-            @if(!empty($paper->examName?->session))
-                | (Session {{ $paper->examName->session }})
-            @elseif(!empty($paper->session))
-                | (Session {{ $paper->session }})
-            @else
-                | (Session 2026-27)
-            @endif
-        </h4>
+        <h2>{{ $paper->title ?? 'Question Paper' }}</h2>
 
         <table class="paper-meta">
             <tr>
@@ -352,40 +271,37 @@
 
     function pdfOptionClass($options)
     {
-        $count = count($options);
-        $maxLength = 0;
+    $maxLength = 0;
 
-        foreach ($options as $option) {
-            $length = strlen(strip_tags($option->option_text ?? ''));
+    foreach ($options as $option) {
+    $length = strlen(strip_tags($option->option_text ?? ''));
 
-            if ($length > $maxLength) {
-                $maxLength = $length;
-            }
-        }
-
-        if ($count <= 2) {
-            return 'two-column';
-        }
-
-        if ($count === 3) {
-            return 'three-column';
-        }
-
-        if ($count >= 4) {
-            return $maxLength <= 22 ? 'four-column' : 'two-column';
-        }
-
-        return 'two-column';
+    if ($length > $maxLength) {
+    $maxLength = $length;
+    }
     }
 
-    function pdfOptionColumns($class)
-    {
-        return match ($class) {
-            'four-column' => 4,
-            'three-column' => 3,
-            default => 2,
+    if ($maxLength <= 18) {
+        return 'four-column' ;
+        }
+        if ($maxLength <=40) {
+        return 'three-column' ;
+        }
+        if ($maxLength <=80) {
+        return 'two-column' ;
+        }
+
+        return 'one-column' ;
+        }
+
+        function pdfOptionColumns($class)
+        {
+        return match ($class) { 'four-column'=> 4,
+        'three-column' => 3,
+        'two-column' => 2,
+        default => 1,
         };
-    }
+        }
         @endphp
 
         @foreach ($paper->questions->groupBy('section') as $sectionName => $paperQuestions)
@@ -501,6 +417,7 @@
         @endforeach
         @endforeach
         @endforeach
+
 </body>
 
 </html>

@@ -351,8 +351,20 @@ Route::middleware([
         Route::post('/papers/generate-from-blueprint', [AutoPaperGeneratorController::class, 'generateFromBlueprint'])
             ->name('papers.generate-from-blueprint');
 
-        Route::get('/question-papers/{id}/pdf', [QuestionPaperPdfController::class, 'download'])
+        Route::get('/question-papers/{id}/pdf', [QuestionPaperPdfController::class, 'exportPdf'])
             ->name('question-papers.pdf');
+
+        Route::get('/question-papers/{id}/export-pdf', [QuestionPaperPdfController::class, 'exportPdf'])
+            ->name('question-papers.export-pdf');
+
+        Route::get('/question-papers/{id}/answer-key-pdf', [QuestionPaperPdfController::class, 'answerKeyPdf'])
+            ->name('question-papers.answer-key-pdf');
+
+        Route::get('/question-papers/{id}/export-word', [QuestionPaperController::class, 'exportWord'])
+            ->name('question-papers.export-word');
+
+        Route::get('/question-papers/{id}/answer-key-word', [QuestionPaperController::class, 'exportAnswerKeyWord'])
+            ->name('question-papers.answer-key-word');
 
         Route::post('/paper-generator/preview', [PaperGeneratorController::class, 'preview'])
             ->name('paper.generator.preview');
@@ -587,6 +599,12 @@ Route::middleware([
         Route::apiResource('ai-paper-generations', AiPaperGeneratorController::class);
 
         Route::get('/ai-paper-generations/{aiPaperGeneration}/progress', [AiPaperGeneratorController::class, 'progress']);
+
+        Route::post('/ai-generated-questions/{aiGeneratedQuestion}/regenerate', [AiPaperGeneratorController::class, 'regenerateQuestion']);
+
+        Route::post('/ai-generated-questions/{aiGeneratedQuestion}/regenerate-preview',[AiPaperGeneratorController::class, 'regenerateQuestionPreview']);
+
+        Route::post('/ai-generated-questions/{aiGeneratedQuestion}/accept-regenerated',[AiPaperGeneratorController::class, 'acceptRegeneratedQuestion']);
 
         Route::post('/ai-paper-generations/{aiPaperGeneration}/save-to-question-bank', [
             AiPaperGeneratorController::class,

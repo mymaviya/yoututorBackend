@@ -3,19 +3,19 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\GenerateAiPaperJob;
 use App\Models\AiGeneratedQuestion;
 use App\Models\AiPaperGeneration;
 use App\Models\PaperBlueprint;
-use App\Models\QuestionPaper;
-use App\Models\QuestionPaperItem;
-use App\Models\QuestionPaperQuestion;
 use App\Models\Question;
 use App\Models\QuestionMatchPair;
 use App\Models\QuestionOption;
+use App\Models\QuestionPaper;
+use App\Models\QuestionPaperItem;
+use App\Models\QuestionPaperQuestion;
 use App\Services\AiPaperGeneratorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use App\Jobs\GenerateAiPaperJob;
 
 class AiPaperGeneratorController extends Controller
 {
@@ -315,25 +315,6 @@ class AiPaperGeneratorController extends Controller
         ]);
     }
 
-    private function resolveSectionName(AiPaperGeneration $generation, AiGeneratedQuestion $question): ?string
-    {
-        $section = $generation->blueprint?->sections
-            ?->values()
-            ->get((int) ($question->section_index ?? 0));
-
-        return $section?->section_name
-            ?? ($question->section_index !== null ? 'Section ' . ((int) $question->section_index + 1) : null);
-    }
-
-    private function ensureAccess(AiPaperGeneration $generation): void
-    {
-        abort_if(
-            (int) $generation->subscription_id !== (int) auth()->user()->subscription_id,
-            403,
-            'You are not allowed to access this AI generation.'
-        );
-    }
-
     public function progress(AiPaperGeneration $aiPaperGeneration)
     {
         $this->ensureAccess($aiPaperGeneration);
@@ -351,5 +332,87 @@ class AiPaperGeneratorController extends Controller
                 'total_marks' => $aiPaperGeneration->total_marks,
             ],
         ]);
+    }
+
+    public function regenerateQuestion(
+        AiGeneratedQuestion $aiGeneratedQuestion,
+        AiPaperGeneratorService $service
+    ) {
+        return $this->regenerateQuestionPreview($aiGeneratedQuestion, $service);
+    }
+
+    public function regenerateQuestionPreview(
+        AiGeneratedQuestion $aiGeneratedQuestion,
+        AiPaperGeneratorService $service
+    ) {
+        $generation = $aiGeneratedQuestion->generation;
+
+        $this->ensureAccess($generation);
+
+        try {
+            $question = $service->regenerateQuestionPreview(
+                $aiGeneratedQuestion
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Regenerated question preview created.',
+                'data' => $question,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ], 500);
+        }
+    }
+
+    public function acceptRegeneratedQuestion(
+        AiGeneratedQuestion $aiGeneratedQuestion,
+        AiPaperGeneratorService $service
+    ) {
+        $generation = $aiGeneratedQuestion->generation;
+
+        $this->ensureAccess($generation);
+
+        try {
+            $question = $service->acceptRegeneratedQuestion(
+                $aiGeneratedQuestion
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Regenerated question accepted.',
+                'data' => $question,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ], 500);
+        }
+    }
+
+    private function resolveSectionName(AiPaperGeneration $generation, AiGeneratedQuestion $question): ?string
+    {
+        $section = $generation->blueprint?->sections
+            ?->values()
+            ->get((int) ($question->section_index ?? 0));
+
+        return $section?->section_name
+            ?? ($question->section_index !== null ? 'Section ' . ((int) $question->section_index + 1) : null);
+    }
+
+    private function ensureAccess(AiPaperGeneration $generation): void
+    {
+        abort_if(
+            (int) $generation->subscription_id !== (int) auth()->user()->subscription_id,
+            403,
+            'You are not allowed to access this AI generation.'
+        );
     }
 }
