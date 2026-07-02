@@ -20,6 +20,14 @@ class Subscription extends Model
         'is_trial',
         'auto_renew',
         'school_code',
+        'school_website',
+        'affiliation_no',
+        'principal_name',
+        'academic_session',
+        'school_logo',
+        'school_email',
+        'school_phone',
+        'school_address',
         'max_users',    
     ];
 

@@ -10,20 +10,51 @@
         }
 
         .first-page-header {
-            text-align: center;
             border-bottom: 1px solid #000;
-            padding-bottom: 1px;
-            margin-bottom: 1px;
+            padding-bottom: 4px;
+            margin-bottom: 4px;
+            background: #ffffff;
+            color: #000000;
+        }
+
+        .school-header-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .school-header-logo-cell {
+            width: 72px;
+            text-align: left;
+            vertical-align: middle;
+        }
+
+        .school-header-spacer-cell {
+            width: 72px;
+        }
+
+        .school-header-logo {
+            width: 56px;
+            height: 56px;
+            object-fit: contain;
+        }
+
+        .school-header-info {
+            text-align: center;
+            vertical-align: middle;
         }
 
         .school-name {
-            font-size: 16px;
+            font-size: 22px;
             font-weight: bold;
             text-transform: uppercase;
+            letter-spacing: 0.5px;
+            line-height: 1.05;
         }
 
         .school-details {
             font-size: 11px;
+            line-height: 1.15;
+            margin-top: 2px;
         }
 
         * {
@@ -255,252 +286,360 @@
             line-height: 1.2;
             margin-top: 3px;
         }
+
+        .word-footer {
+            border-top: 1px solid #000;
+            margin-top: 20px;
+            padding-top: 5px;
+            font-size: 11px;
+            width: 100%;
+        }
+
+        .word-footer-left {
+            float: left;
+            width: 65%;
+            font-weight: bold;
+        }
+
+        .word-footer-right {
+            float: right;
+            width: 30%;
+            text-align: right;
+        }
     </style>
 </head>
 
 <body>
 
-    <div class="first-page-header">
-        <div class="school-name">
-            {{ $schoolName ?? 'SIDDHARTH PUBLIC SCHOOL' }}
-        </div>
+    @php
+    $schoolNameValue = $schoolName ?? ($school['name'] ?? 'Siddharth Public School');
+    $schoolAddressValue = $schoolAddress ?? ($school['address'] ?? 'School Address');
+    $schoolPhoneValue = $schoolPhone ?? ($school['phone'] ?? null);
+    $schoolEmailValue = $schoolEmail ?? ($school['email'] ?? null);
+    $schoolLogoValue = $schoolLogo ?? ($school['logo_path'] ?? null);
+    $academicSessionValue = $academicSession ?? ($school['academic_session'] ?? null);
 
-        <div class="school-details">
-            {{ $schoolAddress ?? 'School Address' }}
-            @if(!empty($schoolPhone))
-            | Phone: {{ $schoolPhone }}
-            @endif
-            @if(!empty($schoolEmail))
-            | Email: {{ $schoolEmail }}
-            @endif
-        </div>
-    </div>
+    function pdfDurationLabel($minutes)
+    {
+    $minutes = (int) $minutes;
 
+    if ($minutes <= 0) {
+        return '-' ;
+        }
 
+        if ($minutes < 60) {
+        return $minutes . ' Minutes' ;
+        }
 
-    <div class="paper-header">
-        <h4>
-            {{ strtoupper($paper->examName?->name ?? $paper->exam_type ?? 'QUESTION PAPER') }}
-            @if(!empty($paper->examName?->session))
-                | (Session {{ $paper->examName->session }})
-            @elseif(!empty($paper->session))
-                | (Session {{ $paper->session }})
-            @else
-                | (Session 2026-27)
-            @endif
-        </h4>
+        $hours=intdiv($minutes, 60);
+        $remaining=$minutes % 60;
 
-        <table class="paper-meta">
+        if ($remaining===0) {
+        return $hours . ' Hrs.' ;
+        }
+
+        if ($remaining===30) {
+        return $hours . '½ Hrs.' ;
+        }
+
+        return $hours . ' Hr ' . $remaining . ' Min.' ;
+        }
+
+        $schoolLogoSrc=null;
+
+        if (!empty($schoolLogoValue)) {
+        $rawLogo=(string) $schoolLogoValue;
+
+        if (str_starts_with($rawLogo, 'http' ) || str_starts_with($rawLogo, 'data:' )) {
+        $schoolLogoSrc=$rawLogo;
+        } elseif (file_exists($rawLogo)) {
+        $schoolLogoSrc=$rawLogo;
+        } else {
+        $cleanLogo=ltrim($rawLogo, '/' );
+
+        $possibleLogoPaths=[
+        public_path($cleanLogo),
+        public_path('storage/' . $cleanLogo),
+        storage_path('app/public/' . $cleanLogo),
+        ];
+
+        foreach ($possibleLogoPaths as $logoPath) {
+        if ($logoPath && file_exists($logoPath)) {
+        $schoolLogoSrc=$logoPath;
+        break;
+        }
+        }
+        }
+        }
+        @endphp
+
+        <div class="first-page-header">
+        <table class="school-header-table">
             <tr>
-                <td>
-                    <strong>Subject:</strong>
-                    {{ $paper->subject->name ?? '-' }}
+                <td class="school-header-logo-cell">
+                    @if($schoolLogoSrc)
+                    <img
+                        src="{{ $schoolLogoSrc }}"
+                        class="school-header-logo">
+                    @endif
                 </td>
 
-                <td>
-                    <strong>Duration:</strong>
-                    {{ $paper->duration ?? 0 }} Minutes
-                </td>
-            </tr>
+                <td class="school-header-info">
+                    <div class="school-name">
+                        {{ $schoolNameValue }}
+                    </div>
 
-            <tr>
-                <td>
-                    <strong>Class:</strong>
-                    {{ $paper->grade->name ?? '-' }}
+                    <div class="school-details">
+                        {{ $schoolAddressValue }}
+                        @if(!empty($schoolPhoneValue))
+                        | Phone: {{ $schoolPhoneValue }}
+                        @endif
+                        @if(!empty($schoolEmailValue))
+                        | Email: {{ $schoolEmailValue }}
+                        @endif
+                    </div>
                 </td>
 
-                <td>
-                    <strong>Max Marks:</strong>
-                    {{ $paper->total_marks ?? 0 }}
-                </td>
+                <td class="school-header-spacer-cell"></td>
             </tr>
         </table>
-    </div>
-
-    <hr>
-
-    @if ($paper->instructions)
-    <div class="general-instructions">
-        {!! $paper->instructions !!}
-    </div>
-    @endif
-
-    @php
-    $questionNo = 1;
-
-    function pdfQuestionTypeLabel($type)
-    {
-    return [
-    'mcq' => 'Multiple Choice Questions',
-    'multiple_mcq' => 'Multiple Correct Questions',
-    'true_false' => 'True / False',
-    'fill_blank' => 'Fill in the Blanks',
-    'short' => 'Short Answer Questions',
-    'long' => 'Long Answer Questions',
-    'match_column' => 'Match the Columns',
-    'assertion_reason' => 'Assertion & Reason',
-    'numerical' => 'Numerical Problems',
-    ][$type] ?? ucwords(str_replace('_', ' ', $type));
-    }
-
-    function pdfMarksLabel($marks)
-    {
-    $marks = (float) $marks;
-
-    return rtrim(rtrim(number_format($marks, 2), '0'), '.') . ' ' . ($marks > 1 ? 'Marks' : 'Mark');
-    }
-
-    function pdfOptionClass($options)
-    {
-        $count = count($options);
-        $maxLength = 0;
-
-        foreach ($options as $option) {
-            $length = strlen(strip_tags($option->option_text ?? ''));
-
-            if ($length > $maxLength) {
-                $maxLength = $length;
-            }
-        }
-
-        if ($count <= 2) {
-            return 'two-column';
-        }
-
-        if ($count === 3) {
-            return 'three-column';
-        }
-
-        if ($count >= 4) {
-            return $maxLength <= 22 ? 'four-column' : 'two-column';
-        }
-
-        return 'two-column';
-    }
-
-    function pdfOptionColumns($class)
-    {
-        return match ($class) {
-            'four-column' => 4,
-            'three-column' => 3,
-            default => 2,
-        };
-    }
-        @endphp
-
-        @foreach ($paper->questions->groupBy('section') as $sectionName => $paperQuestions)
-        @php
-        $sectionTotal = $paperQuestions->sum('marks');
-        @endphp
-
-        <div class="section-heading">
-            {{ $sectionName ?: 'Section A' }}
-            ({{ rtrim(rtrim(number_format($sectionTotal, 2), '0'), '.') }}
-            {{ $sectionTotal > 1 ? 'Marks' : 'Mark' }})
         </div>
 
-        @foreach ($paperQuestions->groupBy(fn ($pq) => $pq->question?->type?->slug ?? 'unknown') as $type => $typeQuestions)
-        <div class="group-heading">
-            {{ pdfQuestionTypeLabel($type) }}
-        </div>
 
-        @foreach ($typeQuestions as $paperQuestion)
-        @php
-        $q = $paperQuestion->question;
-        @endphp
 
-        @if ($q)
-        <div class="preview-question">
-            <table class="question-table">
+        <div class="paper-header">
+            <h4>
+                {{ strtoupper($paper->examName?->name ?? $paper->exam_type ?? 'QUESTION PAPER') }}
+                @if(!empty($paper->examName?->session))
+                | (Session {{ $paper->examName->session }})
+                @elseif(!empty($paper->academic_session))
+                | (Session {{ $paper->academic_session }})
+                @elseif(!empty($paper->session))
+                | (Session {{ $paper->session }})
+                @else
+                | (Session {{ $academicSessionValue ?? '2026-27' }})
+                @endif
+            </h4>
+
+            <table class="paper-meta">
                 <tr>
-                    <td class="question-number">
-                        Q{{ $questionNo++ }}.
+                    <td>
+                        <strong>Subject:</strong>
+                        {{ $paper->subject->name ?? '-' }}
                     </td>
 
-                    <td class="question-body">
-                        {!! $q->question ?? '' !!}
+                    <td>
+                        <strong>Duration:</strong>
+                        {{ pdfDurationLabel($paper->display_duration_minutes ?? $paper->duration_minutes ?? $paper->duration ?? 0) }}
+                    </td>
+                </tr>
 
-                        @if ($q->question_image)
-                        <br>
-                        <img src="{{ public_path($q->question_image) }}" class="question-image">
-                        @endif
-
-                        @if (in_array($q->type?->slug, ['mcq', 'multiple_mcq', 'true_false']) && $q->options->count())
-                        @php
-                        $optionClass = pdfOptionClass($q->options);
-                        $cols = pdfOptionColumns($optionClass);
-                        @endphp
-
-                        <table class="mcq-options {{ $optionClass }}">
-                            <tr>
-                                @foreach ($q->options as $index => $option)
-                                <td>
-                                    <span class="option-label">
-                                        {{ chr(65 + $index) }}.
-                                    </span>
-
-                                    {!! $option->option_text !!}
-
-                                    @if ($option->option_image)
-                                    <br>
-                                    <img src="{{ public_path($option->option_image) }}"
-                                        class="option-image">
-                                    @endif
-                                </td>
-
-                                @if (($index + 1) % $cols === 0 && !$loop->last)
-                            </tr>
-                            <tr>
-                                @endif
-                                @endforeach
-                            </tr>
-                        </table>
-                        @endif
-
-                        @if ($q->type?->slug === 'match_column' && $q->matchPairs->count())
-                        @php
-                        $leftColumn = $q->matchPairs->shuffle()->values();
-                        $rightColumn = $q->matchPairs->shuffle()->values();
-                        @endphp
-
-                        <table class="match-grid">
-                            <tr>
-                                <td>
-                                    <strong>Column A</strong>
-
-                                    @foreach ($leftColumn as $i => $pair)
-                                    <div class="match-row">
-                                        {{ $i + 1 }}.
-                                        {{ $pair->left_text }}
-                                    </div>
-                                    @endforeach
-                                </td>
-
-                                <td>
-                                    <strong>Column B</strong>
-
-                                    @foreach ($rightColumn as $i => $pair)
-                                    <div class="match-row">
-                                        {{ chr(65 + $i) }}.
-                                        {{ $pair->right_text }}
-                                    </div>
-                                    @endforeach
-                                </td>
-                            </tr>
-                        </table>
-                        @endif
+                <tr>
+                    <td>
+                        <strong>Class:</strong>
+                        {{ $paper->grade->name ?? '-' }}
                     </td>
 
-                    <td class="marks-box">
-                        {{ pdfMarksLabel($paperQuestion->marks) }}
+                    <td>
+                        <strong>Max Marks:</strong>
+                        {{ $paper->total_marks ?? 0 }}
                     </td>
                 </tr>
             </table>
         </div>
+
+        <hr>
+
+        @if ($paper->instructions)
+        <div class="general-instructions">
+            {!! $paper->instructions !!}
+        </div>
         @endif
-        @endforeach
-        @endforeach
-        @endforeach
+
+        @php
+        $questionNo = 1;
+
+        function pdfQuestionTypeLabel($type)
+        {
+        return [
+        'mcq' => 'Multiple Choice Questions',
+        'multiple_mcq' => 'Multiple Correct Questions',
+        'true_false' => 'True / False',
+        'fill_blank' => 'Fill in the Blanks',
+        'short' => 'Short Answer Questions',
+        'long' => 'Long Answer Questions',
+        'match_column' => 'Match the Columns',
+        'assertion_reason' => 'Assertion & Reason',
+        'numerical' => 'Numerical Problems',
+        ][$type] ?? ucwords(str_replace('_', ' ', $type));
+        }
+
+        function pdfMarksLabel($marks)
+        {
+        $marks = (float) $marks;
+
+        return rtrim(rtrim(number_format($marks, 2), '0'), '.') . ' ' . ($marks > 1 ? 'Marks' : 'Mark');
+        }
+
+        function pdfOptionClass($options)
+        {
+        $count = count($options);
+        $maxLength = 0;
+
+        foreach ($options as $option) {
+        $length = strlen(strip_tags($option->option_text ?? ''));
+
+        if ($length > $maxLength) {
+        $maxLength = $length;
+        }
+        }
+
+        if ($count <= 2) {
+            return 'two-column' ;
+            }
+
+            if ($count===3) {
+            return 'three-column' ;
+            }
+
+            if ($count>= 4) {
+            return $maxLength <= 22 ? 'four-column' : 'two-column' ;
+                }
+
+                return 'two-column' ;
+                }
+
+                function pdfOptionColumns($class)
+                {
+                return match ($class) { 'four-column'=> 4,
+                'three-column' => 3,
+                default => 2,
+                };
+                }
+                @endphp
+
+                @foreach ($paper->questions->groupBy('section') as $sectionName => $paperQuestions)
+                @php
+                $sectionTotal = $paperQuestions->sum('marks');
+                @endphp
+
+                <div class="section-heading">
+                    {{ $sectionName ?: 'Section A' }}
+                    ({{ rtrim(rtrim(number_format($sectionTotal, 2), '0'), '.') }}
+                    {{ $sectionTotal > 1 ? 'Marks' : 'Mark' }})
+                </div>
+
+                @foreach ($paperQuestions->groupBy(fn ($pq) => $pq->question?->type?->slug ?? 'unknown') as $type => $typeQuestions)
+                <div class="group-heading">
+                    {{ pdfQuestionTypeLabel($type) }}
+                </div>
+
+                @foreach ($typeQuestions as $paperQuestion)
+                @php
+                $q = $paperQuestion->question;
+                @endphp
+
+                @if ($q)
+                <div class="preview-question">
+                    <table class="question-table">
+                        <tr>
+                            <td class="question-number">
+                                Q{{ $questionNo++ }}.
+                            </td>
+
+                            <td class="question-body">
+                                {!! $q->question ?? '' !!}
+
+                                @if ($q->question_image)
+                                <br>
+                                <img src="{{ public_path($q->question_image) }}" class="question-image">
+                                @endif
+
+                                @if (in_array($q->type?->slug, ['mcq', 'multiple_mcq', 'true_false']) && $q->options->count())
+                                @php
+                                $optionClass = pdfOptionClass($q->options);
+                                $cols = pdfOptionColumns($optionClass);
+                                @endphp
+
+                                <table class="mcq-options {{ $optionClass }}">
+                                    <tr>
+                                        @foreach ($q->options as $index => $option)
+                                        <td>
+                                            <span class="option-label">
+                                                {{ chr(65 + $index) }}.
+                                            </span>
+
+                                            {!! $option->option_text !!}
+
+                                            @if ($option->option_image)
+                                            <br>
+                                            <img src="{{ public_path($option->option_image) }}"
+                                                class="option-image">
+                                            @endif
+                                        </td>
+
+                                        @if (($index + 1) % $cols === 0 && !$loop->last)
+                                    </tr>
+                                    <tr>
+                                        @endif
+                                        @endforeach
+                                    </tr>
+                                </table>
+                                @endif
+
+                                @if ($q->type?->slug === 'match_column' && $q->matchPairs->count())
+                                @php
+                                $leftColumn = $q->matchPairs->shuffle()->values();
+                                $rightColumn = $q->matchPairs->shuffle()->values();
+                                @endphp
+
+                                <table class="match-grid">
+                                    <tr>
+                                        <td>
+                                            <strong>Column A</strong>
+
+                                            @foreach ($leftColumn as $i => $pair)
+                                            <div class="match-row">
+                                                {{ $i + 1 }}.
+                                                {{ $pair->left_text }}
+                                            </div>
+                                            @endforeach
+                                        </td>
+
+                                        <td>
+                                            <strong>Column B</strong>
+
+                                            @foreach ($rightColumn as $i => $pair)
+                                            <div class="match-row">
+                                                {{ chr(65 + $i) }}.
+                                                {{ $pair->right_text }}
+                                            </div>
+                                            @endforeach
+                                        </td>
+                                    </tr>
+                                </table>
+                                @endif
+                            </td>
+
+                            <td class="marks-box">
+                                {{ pdfMarksLabel($paperQuestion->marks) }}
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                @endif
+                @endforeach
+                @endforeach
+                @endforeach
+
+                @if(($exportMode ?? 'pdf') === 'html')
+                <div class="word-footer">
+                    <div class="word-footer-left">{{ $schoolNameValue }}</div>
+                    <div class="word-footer-right">Page </div>
+                    <div style="clear: both;"></div>
+                </div>
+                @endif
+
 </body>
 
 </html>

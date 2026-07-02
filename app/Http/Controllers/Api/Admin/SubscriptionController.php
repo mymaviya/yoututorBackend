@@ -67,7 +67,7 @@ class SubscriptionController extends Controller
                 'message' => 'You are not allowed to view this subscription.',
             ], 403);
         }
-        
+
         return response()->json([
             'success' => true,
             'data' => $subscription->load(['plan', 'licenseKey', 'users'])
@@ -117,12 +117,12 @@ class SubscriptionController extends Controller
                 'max_users' => $validated['max_users'] ?? null,
             ]);
 
-            // if ($subscription->email) {
-            //     Mail::to($subscription->email)
-            //         ->queue(
-            //             new SubscriptionActivatedMail($subscription)
-            //         );
-            // }
+            if ($subscription->email) {
+                Mail::to($subscription->email)
+                    ->queue(
+                        new SubscriptionActivatedMail($subscription)
+                    );
+            }
 
             $license = LicenseKey::create([
                 'subscription_id' => $subscription->id,
@@ -343,6 +343,36 @@ class SubscriptionController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Subscription deleted successfully.'
+        ]);
+    }
+
+    public function updateSchoolProfile(Request $request, \App\Models\Subscription $subscription)
+    {
+        $data = $request->validate([
+            'school_name' => ['required', 'string', 'max:255'],
+            'school_address' => ['nullable', 'string', 'max:1000'],
+            'school_phone' => ['nullable', 'string', 'max:50'],
+            'school_email' => ['nullable', 'email', 'max:255'],
+            'academic_session' => ['nullable', 'string', 'max:50'],
+            'principal_name' => ['nullable', 'string', 'max:255'],
+            'school_code' => ['nullable', 'string', 'max:100'],
+            'logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+        ]);
+
+        if ($request->hasFile('logo')) {
+            $data['school_logo'] = $request->file('logo')->store(
+                'school-logos',
+                'public'
+            );
+        }
+
+        unset($data['logo']);
+
+        $subscription->update($data);
+
+        return response()->json([
+            'message' => 'School profile updated successfully.',
+            'data' => $subscription->fresh(),
         ]);
     }
 }

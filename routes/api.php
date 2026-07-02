@@ -72,6 +72,7 @@ use App\Http\Controllers\Api\Admin\MasterQuestionBankController;
 use App\Http\Controllers\Api\AiPaperGeneratorController;
 
 use App\Http\Controllers\Api\TeacherProfileController;
+use App\Http\Controllers\Api\SchoolProfileController;
 
 use App\Models\SidebarMenu;
 use App\Models\Stream;
@@ -234,6 +235,7 @@ Route::middleware(['auth:sanctum', 'role:superadmin,super_admin'])
         Route::put('/subscriptions/{subscription}/status', [SubscriptionController::class, 'updateStatus']);
         Route::post('/subscriptions/{subscription}/suspend', [SubscriptionController::class, 'suspend']);
         Route::post('/subscriptions/{subscription}/cancel', [SubscriptionController::class, 'cancel']);
+        Route::put('/subscriptions/{subscription}/school-profile', [SubscriptionController::class, 'updateSchoolProfile']);
 
         Route::get('/subscription-renewals', [SubscriptionRenewalController::class, 'index']);
         Route::post('/subscriptions/{subscription}/renew', [SubscriptionRenewalController::class, 'renew']);
@@ -433,6 +435,13 @@ Route::middleware([
     });
 
     Route::middleware('role:admin,superadmin,super_admin')->group(function () {
+
+        Route::get('/school-profile', [SchoolProfileController::class, 'show'])
+            ->name('school.profile');
+
+        Route::post('/school-profile', [SchoolProfileController::class, 'update'])
+            ->name('school.profile.update');
+
         Route::get('/app-routes', function () {
             return collect(RouteFacade::getRoutes())
                 ->map(function ($route) {

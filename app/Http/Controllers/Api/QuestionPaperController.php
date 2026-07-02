@@ -546,7 +546,7 @@ class QuestionPaperController extends Controller
 
     private function loadPaperForExport($id): QuestionPaper
     {
-        return QuestionPaper::with([
+        $paper = QuestionPaper::with([
             'grade',
             'stream',
             'subject',
@@ -558,6 +558,25 @@ class QuestionPaperController extends Controller
             'questions.question.lesson',
             'questions.question.type',
         ])->findOrFail($id);
+
+        $duration = $paper->duration_minutes
+            ?? $paper->duration
+            ?? $paper->blueprint?->duration_minutes
+            ?? $paper->blueprint?->duration
+            ?? 0;
+
+        $paper->setAttribute('display_duration_minutes', (int) $duration);
+
+        if ($paper->questions) {
+            $paper->questions = $paper->questions
+                ->sortBy([
+                    ['section', 'asc'],
+                    ['sort_order', 'asc'],
+                ])
+                ->values();
+        }
+
+        return $paper;
     }
 
     private function wordDownloadResponse(string $html, string $filename)
@@ -649,9 +668,17 @@ class QuestionPaperController extends Controller
 
     private function buildQuestionPaperHtml(QuestionPaper $paper, bool $includeAnswers = false): string
     {
+        $school = $this->schoolHeaderDetails($paper);
+
         return view('pdf.question-paper', [
             'paper' => $paper,
-            'school' => $this->schoolHeaderDetails($paper),
+            'school' => $school,
+            'schoolName' => $school['name'] ?? 'Siddharth Public School',
+            'schoolAddress' => $school['address'] ?? 'School Address',
+            'schoolPhone' => $school['phone'] ?? null,
+            'schoolEmail' => $school['email'] ?? null,
+            'schoolLogo' => $school['logo_path'] ?? null,
+            'academicSession' => $school['academic_session'] ?? null,
             'includeAnswers' => $includeAnswers,
             'exportMode' => 'html',
         ])->render();
@@ -659,9 +686,17 @@ class QuestionPaperController extends Controller
 
     private function buildAnswerKeyHtml(QuestionPaper $paper): string
     {
+        $school = $this->schoolHeaderDetails($paper);
+
         return view('pdf.answer-key', [
             'paper' => $paper,
-            'school' => $this->schoolHeaderDetails($paper),
+            'school' => $school,
+            'schoolName' => $school['name'] ?? 'Siddharth Public School',
+            'schoolAddress' => $school['address'] ?? 'School Address',
+            'schoolPhone' => $school['phone'] ?? null,
+            'schoolEmail' => $school['email'] ?? null,
+            'schoolLogo' => $school['logo_path'] ?? null,
+            'academicSession' => $school['academic_session'] ?? null,
             'exportMode' => 'html',
         ])->render();
     }
@@ -700,18 +735,23 @@ class QuestionPaperController extends Controller
                 ?? $subscription->name
                 ?? config('app.school_name')
                 ?? env('SCHOOL_NAME', 'SCHOOL NAME'),
-            'address' => $subscription->address
-                ?? $subscription->school_address
+            'address' => $subscription->school_address
+                ?? $subscription->address
                 ?? config('app.school_address')
                 ?? env('SCHOOL_ADDRESS', 'School Address'),
-            'phone' => $subscription->phone
+            'phone' => $subscription->school_phone
+                ?? $subscription->phone
                 ?? $subscription->contact
                 ?? $subscription->mobile
                 ?? config('app.school_phone')
                 ?? env('SCHOOL_PHONE'),
-            'email' => $subscription->email
+            'email' => $subscription->school_email
+                ?? $subscription->email
                 ?? config('app.school_email')
                 ?? env('SCHOOL_EMAIL'),
+            'academic_session' => $subscription->academic_session
+                ?? config('app.academic_session')
+                ?? env('ACADEMIC_SESSION'),
             'logo_path' => $logoPath,
         ];
     }

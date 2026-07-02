@@ -70,6 +70,14 @@ class QuestionPaperPdfController extends Controller
 
         $paper->total_marks = $paper->questions->sum('marks');
 
+        $duration = $paper->duration_minutes
+            ?? $paper->duration
+            ?? $paper->blueprint?->duration_minutes
+            ?? $paper->blueprint?->duration
+            ?? 0;
+
+        $paper->setAttribute('display_duration_minutes', (int) $duration);
+
         return $paper;
     }
 
@@ -141,7 +149,7 @@ class QuestionPaperPdfController extends Controller
         return $exportService->downloadQuestionPaperPdf($paper, $school);
     }
 
-    public function answerKeyPdf($id)
+    public function answerKeyPdf($id, QuestionPaperExportService $exportService)
     {
         $paper = $this->loadPaper($id);
 
@@ -149,14 +157,8 @@ class QuestionPaperPdfController extends Controller
             return $response;
         }
 
-        $pdf = Pdf::loadView('pdf.answer-key', [
-            'paper' => $paper,
-            'school' => $this->schoolHeaderDetails($paper),
-            'exportMode' => 'pdf',
-        ])->setPaper('a4', 'portrait');
+        $school = $this->schoolHeaderDetails($paper);
 
-        $fileName = Str::slug(($paper->grade?->name ?? 'paper') . '-' . ($paper->subject?->name ?? 'subject') . '-' . ($paper->title ?? 'question-paper') . '-answer-key') . '.pdf';
-
-        return $pdf->download($fileName);
+        return $exportService->downloadAnswerKeyPdf($paper, $school);
     }
 }
