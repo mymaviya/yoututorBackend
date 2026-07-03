@@ -232,6 +232,12 @@ class PermissionSeeder extends Seeder
                 'group_name' => 'Premium Question Bank',
             ],
             [
+                'name' => 'Manage Bell Schedule',
+                'slug' => 'bell_schedule_management',
+                'group_name' => 'Bell Schedule',
+            ],
+
+            [
                 'name' => 'View AI Paper Generator',
                 'slug' => 'ai.paper.generator.index',
                 'group_name' => 'AI Paper Generator',

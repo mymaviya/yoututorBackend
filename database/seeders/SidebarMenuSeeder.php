@@ -132,6 +132,22 @@ class SidebarMenuSeeder extends Seeder
                 'show_in_sidebar' => true,
             ],
             [
+                'title' => 'Bell Schedule',
+                'icon' => 'mdi-bell-ring',
+                'route' => '/bell-schedules',
+                'route_name' => 'bell-schedules',
+                'group_name' => 'Academic',
+                'parent_menu' => 'Academic',
+                'permission_slug' => 'bell_schedule_management',
+                'feature_key' => 'bell_schedule_management',
+                'role_slug' => null,
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 9,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            [
                 'title' => 'Question Types',
                 'icon' => 'mdi-format-list-bulleted-type',
                 'route' => '/question-types',
@@ -929,6 +945,7 @@ class SidebarMenuSeeder extends Seeder
             'subject-templates' => 'academic_setup',
             'subject-templates.apply' => 'academic_setup',
             'lessons.index' => 'academic_setup',
+            'bell-schedules' => 'bell_schedule_management',
 
             // Question Bank
             'question.types' => 'question_bank',

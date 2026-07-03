@@ -28,6 +28,9 @@ class SubscriptionPlanFeatureSeeder extends Seeder
         'advanced_security',
         'crm',
         'saas_management',
+        'bell_schedule_management',
+        'ai_paper_generator',
+        'premium_question_bank',
     ];
 
     public function run(): void
@@ -50,6 +53,7 @@ class SubscriptionPlanFeatureSeeder extends Seeder
                 'exam_portion',
                 'basic_reports',
                 'import_export',
+                'bell_schedule_management',
             ],
 
             /**
@@ -71,6 +75,7 @@ class SubscriptionPlanFeatureSeeder extends Seeder
                 'import_export',
                 'premium_question_bank',
                 'ai_paper_generator',
+                'bell_schedule_management',
             ],
 
             /**

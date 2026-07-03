@@ -48,6 +48,7 @@ use App\Http\Controllers\Api\Public\DemoEnquiryController;
 use App\Http\Controllers\Api\Public\RazorpayPaymentController;
 use App\Http\Controllers\Api\Public\PublicSettingController;
 use App\Http\Controllers\Api\Public\RazorpayWebhookController;
+use App\Http\Controllers\Api\Public\DesktopDashboardController;
 
 use App\Http\Controllers\Api\Admin\DemoEnquiryController as AdminDemoEnquiryController;
 use App\Http\Controllers\Api\Admin\SubscriptionController;
@@ -73,6 +74,7 @@ use App\Http\Controllers\Api\AiPaperGeneratorController;
 
 use App\Http\Controllers\Api\TeacherProfileController;
 use App\Http\Controllers\Api\SchoolProfileController;
+use App\Http\Controllers\Api\BellScheduleController;
 
 use App\Models\SidebarMenu;
 use App\Models\Stream;
@@ -104,6 +106,8 @@ Route::prefix('public/payment')->group(function () {
 });
 
 Route::post('/webhooks/razorpay', [RazorpayWebhookController::class, 'handle']);
+
+Route::get('/desktop-dashboard/data', [DesktopDashboardController::class, 'data']);
 
 /*
 |--------------------------------------------------------------------------
@@ -573,6 +577,21 @@ Route::middleware([
             'index' => 'teachers.index',
         ]);
 
+        Route::get('/bell-schedules', [BellScheduleController::class, 'index'])
+            ->name('bell-schedules.index');
+
+        Route::get('/bell-schedules/settings', [BellScheduleController::class, 'settings'])
+            ->name('bell-schedules.settings');
+
+        Route::post('/bell-schedules/settings', [BellScheduleController::class, 'saveSettings'])
+            ->name('bell-schedules.settings.save');
+
+        Route::post('/bell-schedules/generate', [BellScheduleController::class, 'generate'])
+            ->name('bell-schedules.generate');
+
+        Route::get('/bell-schedules/preview', [BellScheduleController::class, 'preview'])
+            ->name('bell-schedules.preview');
+
         Route::post('/sidebar-menus/reorder', [SidebarMenuController::class, 'reorder'])->name('sidebar-menus.reorder');
         Route::apiResource('sidebar-menus', SidebarMenuController::class);
 
@@ -611,9 +630,9 @@ Route::middleware([
 
         Route::post('/ai-generated-questions/{aiGeneratedQuestion}/regenerate', [AiPaperGeneratorController::class, 'regenerateQuestion']);
 
-        Route::post('/ai-generated-questions/{aiGeneratedQuestion}/regenerate-preview',[AiPaperGeneratorController::class, 'regenerateQuestionPreview']);
+        Route::post('/ai-generated-questions/{aiGeneratedQuestion}/regenerate-preview', [AiPaperGeneratorController::class, 'regenerateQuestionPreview']);
 
-        Route::post('/ai-generated-questions/{aiGeneratedQuestion}/accept-regenerated',[AiPaperGeneratorController::class, 'acceptRegeneratedQuestion']);
+        Route::post('/ai-generated-questions/{aiGeneratedQuestion}/accept-regenerated', [AiPaperGeneratorController::class, 'acceptRegeneratedQuestion']);
 
         Route::post('/ai-paper-generations/{aiPaperGeneration}/save-to-question-bank', [
             AiPaperGeneratorController::class,
