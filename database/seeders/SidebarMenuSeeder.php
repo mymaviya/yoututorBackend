@@ -928,8 +928,35 @@ class SidebarMenuSeeder extends Seeder
                 'is_active' => true,
                 'show_in_sidebar' => true,
             ],
-            
-            
+            [
+                'title' => 'Academic Planning',
+                'icon' => 'mdi-calendar-clock',
+                'route' => '/academic-planning',
+                'route_name' => 'academic.planning.dashboard',
+                'group_name' => 'Academic Planning',
+                'parent_menu' => 'Academic Planning',
+                'permission_slug' => 'academic.planning.dashboard',
+                'feature_key' => 'academic_planning',
+                'sort_order' => 100,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+
+            [
+                'title' => 'Teacher Assignment',
+                'route' => '/academic-planning/teacher-assignment',
+                'route_name' => 'teacher.assignment',
+                'group_name' => 'Academic Planning',
+                'parent_menu' => 'Academic Planning',
+                'permission_slug' => 'teacher.assignment',
+                'feature_key' => 'academic_planning',
+                'sort_order' => 101,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+
+
+
 
 
 
@@ -1077,6 +1104,36 @@ class SidebarMenuSeeder extends Seeder
             'admin.question-bank-packages.index' => 'saas_management',
             'admin.master-questions.index' => 'saas_management',
             'admin.question-bank-purchases.index' => 'saas_management',
+
+            'academic.planning.dashboard' => 'academic_planning',
+
+            'academic.years' => 'academic_planning',
+
+            'timetable.templates' => 'academic_planning',
+
+            'teacher.assignment' => 'academic_planning',
+
+            'teacher.availability' => 'academic_planning',
+
+            'teacher.workload' => 'academic_planning',
+
+            'rooms.index' => 'academic_planning',
+
+            'subject.allocation' => 'academic_planning',
+
+            'parallel.groups' => 'academic_planning',
+
+            'timetable.rules' => 'academic_planning',
+
+            'timetable.generate' => 'academic_planning',
+
+            'timetable.drafts' => 'academic_planning',
+
+            'timetable.publish' => 'academic_planning',
+
+            'teacher.substitution' => 'academic_planning',
+
+            'academic.planning.reports' => 'academic_planning',
         ];
 
         foreach ($menus as $menu) {

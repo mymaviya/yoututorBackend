@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::getDriverName() !== 'mysql') {
+            return;
+        }
+        
         $this->backfillFromUser('questions', 'created_by');
         $this->backfillFromUser('question_papers', 'created_by');
         $this->backfillFromUser('teacher_question_tasks', 'teacher_id');
@@ -46,8 +50,10 @@ return new class extends Migration
 
     private function backfillFromQuestionPapers(): void
     {
-        if (! $this->hasColumns('question_paper_questions', ['question_paper_id'])
-            || ! $this->hasColumns('question_papers', ['subscription_id'])) {
+        if (
+            ! $this->hasColumns('question_paper_questions', ['question_paper_id'])
+            || ! $this->hasColumns('question_papers', ['subscription_id'])
+        ) {
             return;
         }
 
@@ -56,8 +62,10 @@ return new class extends Migration
 
     private function backfillLessonsFromSubjects(): void
     {
-        if (! $this->hasColumns('lessons', ['subscription_id', 'subject_id'])
-            || ! $this->hasColumns('subjects', ['subscription_id'])) {
+        if (
+            ! $this->hasColumns('lessons', ['subscription_id', 'subject_id'])
+            || ! $this->hasColumns('subjects', ['subscription_id'])
+        ) {
             return;
         }
 
@@ -66,8 +74,10 @@ return new class extends Migration
 
     private function backfillSubjectsFromQuestions(): void
     {
-        if (! $this->hasColumns('subjects', ['subscription_id'])
-            || ! $this->hasColumns('questions', ['subscription_id', 'subject_id'])) {
+        if (
+            ! $this->hasColumns('subjects', ['subscription_id'])
+            || ! $this->hasColumns('questions', ['subscription_id', 'subject_id'])
+        ) {
             return;
         }
 
@@ -76,8 +86,10 @@ return new class extends Migration
 
     private function backfillQuestionTypeAssignmentsFromSubjects(): void
     {
-        if (! $this->hasColumns('question_type_assignments', ['subscription_id', 'subject_id'])
-            || ! $this->hasColumns('subjects', ['subscription_id'])) {
+        if (
+            ! $this->hasColumns('question_type_assignments', ['subscription_id', 'subject_id'])
+            || ! $this->hasColumns('subjects', ['subscription_id'])
+        ) {
             return;
         }
 
@@ -104,8 +116,10 @@ return new class extends Migration
 
     private function backfillBlueprintsFromQuestions(): void
     {
-        if (! $this->hasColumns('paper_blueprints', ['subscription_id', 'grade_id', 'subject_id'])
-            || ! $this->hasColumns('questions', ['subscription_id', 'grade_id', 'subject_id'])) {
+        if (
+            ! $this->hasColumns('paper_blueprints', ['subscription_id', 'grade_id', 'subject_id'])
+            || ! $this->hasColumns('questions', ['subscription_id', 'grade_id', 'subject_id'])
+        ) {
             return;
         }
 

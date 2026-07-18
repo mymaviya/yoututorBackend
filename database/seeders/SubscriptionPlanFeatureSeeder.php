@@ -19,6 +19,7 @@ class SubscriptionPlanFeatureSeeder extends Seeder
         'manual_paper_creation',
         'blueprint_management',
         'auto_paper_generator',
+        'academic_planning',
         'teacher_management',
         'teacher_tasks',
         'exam_portion',

@@ -3,6 +3,10 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use App\Models\TeacherAvailabilityException;
+use App\Observers\TeacherAvailabilityExceptionObserver;
+use App\Models\TimetableEntry;
+use App\Observers\TimetableEntryObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -19,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        TeacherAvailabilityException::observe(TeacherAvailabilityExceptionObserver::class);
+        TimetableEntry::observe(TimetableEntryObserver::class);
     }
 }

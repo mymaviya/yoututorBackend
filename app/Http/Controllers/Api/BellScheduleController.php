@@ -14,11 +14,7 @@ class BellScheduleController extends Controller
 {
     public function index(): JsonResponse
     {
-        $bells = SchoolBell::query()
-            ->where('is_active', true)
-            ->orderBy('sort_order')
-            ->orderBy('start_time')
-            ->get();
+        $bells = $this->bellQuery()->get();
 
         return response()->json([
             'success' => true,
@@ -61,6 +57,10 @@ class BellScheduleController extends Controller
             'long_break_after_period' => ['nullable', 'integer', 'min:1', 'max:12'],
             'long_break_duration' => ['required', 'integer', 'min:0', 'max:120'],
 
+            'first_period_extra_minutes' => ['required', 'integer', 'min:0', 'max:30'],
+            'period_after_break_gap' => ['required', 'integer', 'min:0', 'max:30'],
+
+            'bus_dispersal_enabled' => ['required', 'boolean'],
             'bus_dispersal_duration' => ['required', 'integer', 'min:1', 'max:120'],
             'teacher_dispersal_after_school_over' => ['required', 'integer', 'min:0', 'max:300'],
 
@@ -71,6 +71,8 @@ class BellScheduleController extends Controller
             'effective_from' => ['nullable', 'date'],
             'is_active' => ['boolean'],
         ]);
+
+        $this->validateBreakRules($validated);
 
         DB::transaction(function () use (&$setting, $validated) {
             if (($validated['is_active'] ?? true) === true) {
@@ -111,25 +113,52 @@ class BellScheduleController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Bell schedule generated successfully.',
-            'data' => SchoolBell::query()
-                ->where('is_active', true)
-                ->orderBy('sort_order')
-                ->orderBy('start_time')
-                ->get(),
+            'data' => $this->bellQuery()->get(),
         ]);
     }
 
     public function preview(): JsonResponse
     {
-        $bells = SchoolBell::query()
-            ->where('is_active', true)
-            ->orderBy('sort_order')
-            ->orderBy('start_time')
-            ->get();
-
         return response()->json([
             'success' => true,
-            'data' => $bells,
+            'data' => $this->bellQuery()->get(),
         ]);
+    }
+
+    private function bellQuery()
+    {
+        return SchoolBell::query()
+            ->where('is_active', true)
+            ->orderBy('start_time')
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
+    private function validateBreakRules(array $validated): void
+    {
+        $totalPeriods = (int) $validated['total_periods'];
+        $breakMode = $validated['break_mode'];
+
+        if (in_array($breakMode, ['short_only', 'short_and_long'], true)) {
+            validator($validated, [
+                'short_break_after_period' => ['required', 'integer', 'min:1', 'max:' . max(1, $totalPeriods - 1)],
+            ])->validate();
+        }
+
+        if (in_array($breakMode, ['long_only', 'short_and_long'], true)) {
+            validator($validated, [
+                'long_break_after_period' => ['required', 'integer', 'min:1', 'max:' . max(1, $totalPeriods - 1)],
+            ])->validate();
+        }
+
+        if ($breakMode === 'short_and_long'
+            && isset($validated['short_break_after_period'], $validated['long_break_after_period'])
+            && (int) $validated['short_break_after_period'] === (int) $validated['long_break_after_period']) {
+            validator([], [
+                'short_break_after_period' => ['required'],
+            ], [
+                'short_break_after_period.required' => 'Short break and long break cannot be after the same period.',
+            ])->validate();
+        }
     }
 }

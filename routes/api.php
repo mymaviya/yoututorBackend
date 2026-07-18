@@ -75,6 +75,20 @@ use App\Http\Controllers\Api\AiPaperGeneratorController;
 use App\Http\Controllers\Api\TeacherProfileController;
 use App\Http\Controllers\Api\SchoolProfileController;
 use App\Http\Controllers\Api\BellScheduleController;
+use App\Http\Controllers\Api\SchoolNoticeController;
+
+use App\Http\Controllers\Api\Admin\AcademicPlanningController;
+use App\Http\Controllers\Api\Admin\SubjectPeriodAllocationController;
+
+use App\Http\Controllers\Api\SectionController;
+use App\Http\Controllers\Api\AcademicYearController;
+use App\Http\Controllers\Api\TeacherAvailabilityController;
+use App\Http\Controllers\Api\TeacherAvailabilityExceptionController;
+use App\Http\Controllers\Api\TeacherSubstitutionController;
+use App\Http\Controllers\Api\TeacherTimetableController;
+use App\Http\Controllers\Api\TeacherTimetableExportController;
+use App\Http\Controllers\Api\TeacherTimetablePrintController;
+
 
 use App\Models\SidebarMenu;
 use App\Models\Stream;
@@ -592,8 +606,122 @@ Route::middleware([
         Route::get('/bell-schedules/preview', [BellScheduleController::class, 'preview'])
             ->name('bell-schedules.preview');
 
+        Route::apiResource('school-notices', SchoolNoticeController::class);
+
+        Route::post('school-notices/{schoolNotice}/toggle', [SchoolNoticeController::class, 'toggle']);
+
+        Route::prefix('academic-planning')
+            ->controller(AcademicPlanningController::class)
+            ->group(function () {
+
+                Route::get('/dashboard', 'dashboard')
+                    ->name('academic.planning.dashboard');
+
+                Route::get('/statistics', 'statistics')
+                    ->name('academic.planning.statistics');
+
+                Route::get('/readiness', 'readiness')
+                    ->name('academic.planning.readiness');
+
+                Route::get('/warnings', 'warnings')
+                    ->name('academic.planning.warnings');
+            });
+
+        Route::post('/subject-period-allocations/bulk-save', [SubjectPeriodAllocationController::class, 'bulkSave'])
+            ->name('subject.allocation.bulk-save');
+        Route::get('/subject-period-allocations/bulk-editor-data', [SubjectPeriodAllocationController::class, 'bulkEditorData'])
+            ->name('subject.allocation.bulk-editor-data');
+        Route::post('/subject-period-allocations/copy-grade', [SubjectPeriodAllocationController::class, 'copyGrade'])
+            ->name('subject.allocation.copy-grade');
+        Route::get('/subject-period-allocations/export', [SubjectPeriodAllocationController::class, 'export'])
+            ->name('subject.allocation.export');
+        Route::get('/subject-period-allocations/template', [SubjectPeriodAllocationController::class, 'template'])
+            ->name('subject.allocation.template');
+
+        Route::apiResource('subject-period-allocations', SubjectPeriodAllocationController::class);
+
+        Route::prefix('teacher-availability')->group(function () {
+
+            Route::get('/bulk-editor-data', [TeacherAvailabilityController::class, 'bulkEditorData'])->name('teacher.availability.bulk-editor-data');
+
+            Route::apiResource('/', TeacherAvailabilityController::class);
+        });
+
+        Route::prefix('teacher-timetable')->group(function () {
+            Route::get('/', [TeacherTimetableController::class, 'index'])
+                ->name('teacher.timetable.index');
+
+            Route::get('/teacher/{teacher}', [TeacherTimetableController::class, 'teacher'])
+                ->name('teacher.timetable.teacher');
+
+            Route::get('/class', [TeacherTimetableController::class, 'classTimetable'])
+                ->name('teacher.timetable.class');
+
+            Route::get('/today', [TeacherTimetableController::class, 'today'])
+                ->name('teacher.timetable.today');
+
+            Route::get('/free-periods', [TeacherTimetableController::class, 'freePeriods'])
+                ->name('teacher.timetable.free-periods');
+
+            Route::get('/workload', [TeacherTimetableController::class, 'workload'])
+                ->name('teacher.timetable.workload');
+
+            Route::get('/export', [TeacherTimetableExportController::class, 'export'])
+                ->name('teacher.timetable.export');
+
+            Route::get('/print', [TeacherTimetablePrintController::class, 'print'])
+                ->name('teacher.timetable.print');
+        });
+
+        Route::prefix('teacher-availability-exceptions')->group(function () {
+            Route::get('/dashboard', [TeacherAvailabilityExceptionController::class, 'dashboard'])
+                ->name('teacher.availability.dashboard');
+
+            Route::get('/', [TeacherAvailabilityExceptionController::class, 'index'])
+                ->name('teacher.availability');
+
+            Route::post('/', [TeacherAvailabilityExceptionController::class, 'store'])
+                ->name('teacher.availability.store');
+
+            Route::patch('/{teacherAvailabilityException}/move', [TeacherAvailabilityExceptionController::class, 'move'])
+                ->name('teacher.availability.move');
+
+            Route::put('/{teacherAvailabilityException}', [TeacherAvailabilityExceptionController::class, 'update'])
+                ->name('teacher.availability.update');
+
+            Route::delete('/{teacherAvailabilityException}', [TeacherAvailabilityExceptionController::class, 'destroy'])
+                ->name('teacher.availability.delete');
+        });
+
+        Route::prefix('teacher-substitutions')->group(function () {
+            Route::get('/dashboard', [TeacherSubstitutionController::class, 'dashboard'])
+                ->name('teacher.substitutions.dashboard');
+
+            Route::get('/pending', [TeacherSubstitutionController::class, 'pending'])
+                ->name('teacher.substitutions.pending');
+
+            Route::get('/suggestions', [TeacherSubstitutionController::class, 'suggestions'])
+                ->name('teacher.substitutions.suggestions');
+
+            Route::post('/', [TeacherSubstitutionController::class, 'store'])
+                ->name('teacher.substitutions.store');
+
+            Route::post('/{teacherSubstitution}/assign', [TeacherSubstitutionController::class, 'assign'])
+                ->name('teacher.substitutions.assign');
+
+            Route::post('/{teacherSubstitution}/approve', [TeacherSubstitutionController::class, 'approve'])
+                ->name('teacher.substitutions.approve');
+
+            Route::post('/{teacherSubstitution}/cancel', [TeacherSubstitutionController::class, 'cancel'])
+                ->name('teacher.substitutions.cancel');
+        });
+
         Route::post('/sidebar-menus/reorder', [SidebarMenuController::class, 'reorder'])->name('sidebar-menus.reorder');
         Route::apiResource('sidebar-menus', SidebarMenuController::class);
+
+        Route::get('/sections', [SectionController::class, 'index'])
+            ->name('sections.index');
+        Route::apiResource('academic-years', AcademicYearController::class);
 
         Route::post('/question-papers/{id}/finalize', [QuestionPaperController::class, 'finalize'])->name('question-papers.finalize');
         Route::post('/question-papers/{id}/reopen', [QuestionPaperController::class, 'reopen'])->name('question-papers.reopen');

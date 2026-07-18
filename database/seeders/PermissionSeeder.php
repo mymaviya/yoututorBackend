@@ -183,6 +183,78 @@ class PermissionSeeder extends Seeder
             ['name' => 'View Invoices', 'slug' => 'invoices.view', 'group_name' => 'CRM & Billing'],
             ['name' => 'Edit Invoices', 'slug' => 'invoices.edit', 'group_name' => 'CRM & Billing'],
 
+            [
+                'name' => 'Academic Planning Dashboard',
+                'slug' => 'academic.planning.dashboard',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Manage Academic Years',
+                'slug' => 'academic.years',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Manage Timetable Templates',
+                'slug' => 'timetable.templates',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Manage Teacher Assignment',
+                'slug' => 'teacher.assignment',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Manage Teacher Availability',
+                'slug' => 'teacher.availability',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Manage Teacher Workload',
+                'slug' => 'teacher.workload',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Manage Subject Allocation',
+                'slug' => 'subject.allocation',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Manage Parallel Groups',
+                'slug' => 'parallel.groups',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Manage Timetable Rules',
+                'slug' => 'timetable.rules',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Generate Timetable',
+                'slug' => 'timetable.generate',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Publish Timetable',
+                'slug' => 'timetable.publish',
+                'group_name' => 'Academic Planning',
+            ],
+
+            [
+                'name' => 'Teacher Substitution',
+                'slug' => 'teacher.substitution',
+                'group_name' => 'Academic Planning',
+            ],
+
         ];
 
 
@@ -258,7 +330,7 @@ class PermissionSeeder extends Seeder
                 'group_name' => 'AI Paper Generator',
             ],
 
-            
+
         ]);
 
         $permissions = collect($permissions)

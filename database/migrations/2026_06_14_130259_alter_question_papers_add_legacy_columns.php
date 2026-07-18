@@ -57,17 +57,19 @@ return new class extends Migration
             }
         });
 
-        DB::statement("
-            ALTER TABLE question_papers
-            MODIFY status ENUM(
-                'draft',
-                'approved',
-                'published',
-                'finalized',
-                'printed',
-                'archived'
-            ) DEFAULT 'draft'
-        ");
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("
+                ALTER TABLE question_papers
+                MODIFY status ENUM(
+                    'draft',
+                    'approved',
+                    'published',
+                    'finalized',
+                    'printed',
+                    'archived'
+                ) DEFAULT 'draft'
+            ");
+        }
     }
 
     public function down(): void
@@ -91,13 +93,15 @@ return new class extends Migration
             ]);
         });
 
-        DB::statement("
-            ALTER TABLE question_papers
-            MODIFY status ENUM(
-                'draft',
-                'approved',
-                'published'
-            ) DEFAULT 'draft'
-        ");
+        if (DB::getDriverName() === 'mysql') {
+            DB::statement("
+                ALTER TABLE question_papers
+                MODIFY status ENUM(
+                    'draft',
+                    'approved',
+                    'published'
+                ) DEFAULT 'draft'
+            ");
+        }
     }
 };
