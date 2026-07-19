@@ -8,58 +8,104 @@ use Carbon\Carbon;
 
 class TeacherWorkloadService
 {
-    public function todayLoad(int $teacherId, int $academicYearId, string|Carbon $date): int
-    {
+    public function todayLoad(
+        int $subscriptionId,
+        int $teacherId,
+        int $academicYearId,
+        string|Carbon $date
+    ): int {
         $date = Carbon::parse($date);
 
         return TimetableEntry::query()
-            ->where('teacher_id', $teacherId)
+            ->active()
+            ->forSubscription($subscriptionId)
+            ->forTeacher($teacherId)
             ->where('weekday', strtolower($date->format('l')))
-            ->whereHas('weeklyTimetable', function ($query) use ($academicYearId) {
-                $query->where('academic_year_id', $academicYearId);
-            })
+            ->whereHas(
+                'weeklyTimetable',
+                fn ($query) => $query->where('academic_year_id', $academicYearId)
+            )
             ->count();
     }
 
-    public function weeklyLoad(int $teacherId, int $academicYearId, string|Carbon $date): int
-    {
+    public function weeklyLoad(
+        int $subscriptionId,
+        int $teacherId,
+        int $academicYearId
+    ): int {
         return TimetableEntry::query()
-            ->where('teacher_id', $teacherId)
-            ->whereIn('weekday', ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'])
-            ->whereHas('weeklyTimetable', function ($query) use ($academicYearId) {
-                $query->where('academic_year_id', $academicYearId);
-            })
+            ->active()
+            ->forSubscription($subscriptionId)
+            ->forTeacher($teacherId)
+            ->whereIn('weekday', [
+                'monday',
+                'tuesday',
+                'wednesday',
+                'thursday',
+                'friday',
+                'saturday',
+                'sunday',
+            ])
+            ->whereHas(
+                'weeklyTimetable',
+                fn ($query) => $query->where('academic_year_id', $academicYearId)
+            )
             ->count();
     }
 
-    public function monthlySubstitutions(int $teacherId, string|Carbon $date): int
-    {
+    public function monthlySubstitutions(
+        int $subscriptionId,
+        int $teacherId,
+        string|Carbon $date
+    ): int {
         $date = Carbon::parse($date);
 
         return TeacherSubstitution::query()
+            ->where('subscription_id', $subscriptionId)
             ->where('substitute_teacher_id', $teacherId)
             ->whereMonth('substitution_date', $date->month)
             ->whereYear('substitution_date', $date->year)
-            ->whereNotIn('status', ['rejected'])
+            ->whereNotIn('status', [TeacherSubstitution::STATUS_REJECTED])
             ->count();
     }
 
-    public function dailySubstitutions(int $teacherId, string|Carbon $date): int
-    {
+    public function dailySubstitutions(
+        int $subscriptionId,
+        int $teacherId,
+        string|Carbon $date
+    ): int {
         $date = Carbon::parse($date);
 
         return TeacherSubstitution::query()
+            ->where('subscription_id', $subscriptionId)
             ->where('substitute_teacher_id', $teacherId)
             ->whereDate('substitution_date', $date)
-            ->whereNotIn('status', ['rejected'])
+            ->whereNotIn('status', [TeacherSubstitution::STATUS_REJECTED])
             ->count();
     }
 
-    public function workloadScore(int $teacherId, int $academicYearId, string|Carbon $date): float
-    {
-        $todayLoad = $this->todayLoad($teacherId, $academicYearId, $date);
-        $dailySubs = $this->dailySubstitutions($teacherId, $date);
-        $monthlySubs = $this->monthlySubstitutions($teacherId, $date);
+    public function workloadScore(
+        int $subscriptionId,
+        int $teacherId,
+        int $academicYearId,
+        string|Carbon $date
+    ): float {
+        $todayLoad = $this->todayLoad(
+            $subscriptionId,
+            $teacherId,
+            $academicYearId,
+            $date
+        );
+        $dailySubs = $this->dailySubstitutions(
+            $subscriptionId,
+            $teacherId,
+            $date
+        );
+        $monthlySubs = $this->monthlySubstitutions(
+            $subscriptionId,
+            $teacherId,
+            $date
+        );
 
         $score = 20;
         $score -= min($todayLoad * 1.5, 12);
@@ -69,14 +115,40 @@ class TeacherWorkloadService
         return max(round($score, 2), 0);
     }
 
-    public function summary(int $teacherId, int $academicYearId, string|Carbon $date): array
-    {
+    public function summary(
+        int $subscriptionId,
+        int $teacherId,
+        int $academicYearId,
+        string|Carbon $date
+    ): array {
         return [
-            'today' => $this->todayLoad($teacherId, $academicYearId, $date),
-            'weekly' => $this->weeklyLoad($teacherId, $academicYearId, $date),
-            'daily_substitutions' => $this->dailySubstitutions($teacherId, $date),
-            'monthly_substitutions' => $this->monthlySubstitutions($teacherId, $date),
-            'workload_score' => $this->workloadScore($teacherId, $academicYearId, $date),
+            'today' => $this->todayLoad(
+                $subscriptionId,
+                $teacherId,
+                $academicYearId,
+                $date
+            ),
+            'weekly' => $this->weeklyLoad(
+                $subscriptionId,
+                $teacherId,
+                $academicYearId
+            ),
+            'daily_substitutions' => $this->dailySubstitutions(
+                $subscriptionId,
+                $teacherId,
+                $date
+            ),
+            'monthly_substitutions' => $this->monthlySubstitutions(
+                $subscriptionId,
+                $teacherId,
+                $date
+            ),
+            'workload_score' => $this->workloadScore(
+                $subscriptionId,
+                $teacherId,
+                $academicYearId,
+                $date
+            ),
         ];
     }
 }
