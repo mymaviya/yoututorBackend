@@ -13,31 +13,26 @@ class SubstituteSuggestionService
     ) {}
 
     public function suggest(
-        ?int $subscriptionId,
+        int $subscriptionId,
         int $academicYearId,
         int $absentTeacherId,
         string $date,
         int $bellId,
         ?int $subjectId = null
     ): Collection {
-        return User::query()
-            ->when(
-                $subscriptionId,
-                fn($query) => $query->where('subscription_id', $subscriptionId)
-            )
+        return User::teachers()
+            ->where('subscription_id', $subscriptionId)
             ->where('is_active', true)
-            ->whereNull('deleted_at')
-            ->where('status', 'active')
             ->where('id', '!=', $absentTeacherId)
             ->orderBy('name')
             ->get()
-            ->map(function ($teacher) use (
+            ->map(function (User $teacher) use (
                 $subscriptionId,
                 $academicYearId,
                 $date,
                 $bellId,
                 $subjectId
-            ) {
+            ): array {
                 $reasons = [];
                 $warnings = [];
 
@@ -57,7 +52,7 @@ class SubstituteSuggestionService
                     $bellId
                 );
 
-                $available = count($conflicts) === 0;
+                $available = $conflicts === [];
 
                 if ($available) {
                     $breakdown['availability'] = 25;
@@ -69,20 +64,22 @@ class SubstituteSuggestionService
 
                 $subjectMatch = false;
 
-                if (
-                    $subjectId &&
-                    method_exists($teacher, 'subjects') &&
-                    $teacher->subjects()->where('subjects.id', $subjectId)->exists()
-                ) {
-                    $subjectMatch = true;
+                if ($subjectId !== null && method_exists($teacher, 'subjects')) {
+                    $subjectMatch = $teacher->subjects()
+                        ->where('subjects.id', $subjectId)
+                        ->exists();
+                }
+
+                if ($subjectMatch) {
                     $breakdown['subject'] = 40;
                     $reasons[] = 'Same subject teacher';
-                } elseif ($subjectId) {
+                } elseif ($subjectId !== null) {
                     $breakdown['subject'] = 15;
                     $reasons[] = 'Available teacher from another subject';
                 }
 
                 $workload = $this->workloadService->summary(
+                    $subscriptionId,
                     (int) $teacher->id,
                     $academicYearId,
                     $date
@@ -114,26 +111,25 @@ class SubstituteSuggestionService
                     $warnings[] = 'High monthly substitution count';
                 }
 
-                $score = array_sum($breakdown);
-
-                if (!$available) {
-                    $score = 0;
-                }
-
+                $score = $available ? array_sum($breakdown) : 0;
                 $score = max(0, min(100, round($score, 2)));
 
-                $recommendation =
-                    $score >= 90 ? 'Excellent' : ($score >= 75 ? 'Recommended' : ($score >= 60 ? 'Fair' : 'Low'));
+                $recommendation = match (true) {
+                    $score >= 90 => 'Excellent',
+                    $score >= 75 => 'Recommended',
+                    $score >= 60 => 'Fair',
+                    default => 'Low',
+                };
 
                 return [
                     'teacher' => [
-                        'id' => $teacher->id,
+                        'id' => (int) $teacher->id,
                         'name' => $teacher->name,
                         'email' => $teacher->email,
                         'employee_code' => $teacher->employee_code ?? null,
                         'designation' => $teacher->designation ?? null,
                     ],
-                    'score' => max(min(round($score, 2), 100), 0),
+                    'score' => $score,
                     'recommendation' => $recommendation,
                     'breakdown' => $breakdown,
                     'subject_match' => $subjectMatch,
@@ -147,7 +143,7 @@ class SubstituteSuggestionService
                     'available' => $available,
                 ];
             })
-            ->filter(fn($row) => $row['available'])
+            ->filter(fn (array $row): bool => $row['available'])
             ->sortByDesc('score')
             ->values();
     }
