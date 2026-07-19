@@ -5,11 +5,13 @@ namespace App\Models;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SchoolBell extends Model
 {
     protected $fillable = [
+        'subscription_id',
         'title',
         'type',
         'start_time',
@@ -26,6 +28,7 @@ class SchoolBell extends Model
 
     protected $casts = [
         'id' => 'integer',
+        'subscription_id' => 'integer',
         'duration_minutes' => 'integer',
         'period_number' => 'integer',
         'sort_order' => 'integer',
@@ -43,27 +46,33 @@ class SchoolBell extends Model
                 filled($bell->start_time)
                 && $bell->duration_minutes !== null
             ) {
-                $bell->end_time = Carbon::parse(
-                    $bell->start_time
-                )
+                $bell->end_time = Carbon::parse($bell->start_time)
                     ->addMinutes($bell->duration_minutes)
                     ->format('H:i:s');
             }
         });
     }
 
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
     public function timetableEntries(): HasMany
     {
-        return $this->hasMany(
-            TimetableEntry::class,
-            'school_bell_id'
-        );
+        return $this->hasMany(TimetableEntry::class, 'school_bell_id');
     }
 
     public function activeTimetableEntries(): HasMany
     {
-        return $this->timetableEntries()
-            ->where('is_active', true);
+        return $this->timetableEntries()->where('is_active', true);
+    }
+
+    public function scopeForSubscription(
+        Builder $query,
+        int $subscriptionId
+    ): Builder {
+        return $query->where('subscription_id', $subscriptionId);
     }
 
     public function scopeActive(Builder $query): Builder
@@ -90,11 +99,7 @@ class SchoolBell extends Model
 
             $dateQuery
                 ->whereNull('effective_from')
-                ->orWhereDate(
-                    'effective_from',
-                    '<=',
-                    $effectiveDate
-                );
+                ->orWhereDate('effective_from', '<=', $effectiveDate);
         });
     }
 
@@ -108,10 +113,7 @@ class SchoolBell extends Model
 
     public function getDisplayTimeAttribute(): string
     {
-        if (
-            blank($this->start_time)
-            || blank($this->end_time)
-        ) {
+        if (blank($this->start_time) || blank($this->end_time)) {
             return '—';
         }
 
@@ -139,7 +141,7 @@ class SchoolBell extends Model
     {
         return $this->is_active
             && $this->is_teaching_period
-            && !$this->is_break
-            && !$this->is_dispersal;
+            && ! $this->is_break
+            && ! $this->is_dispersal;
     }
 }
