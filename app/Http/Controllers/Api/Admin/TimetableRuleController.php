@@ -172,7 +172,7 @@ class TimetableRuleController extends Controller
         return $data;
     }
 
-    private function ownedExists(string $table, int $subscriptionId): Rule
+    private function ownedExists(string $table, int $subscriptionId): mixed
     {
         return Rule::exists($table, 'id')->where('subscription_id', $subscriptionId);
     }
