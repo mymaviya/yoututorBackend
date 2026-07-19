@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToSubscription;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -40,6 +41,13 @@ class TeacherAvailabilityException extends Model
     ];
 
     protected $casts = [
+        'id' => 'integer',
+        'subscription_id' => 'integer',
+        'academic_year_id' => 'integer',
+        'teacher_id' => 'integer',
+        'weekday' => 'integer',
+        'school_bell_id' => 'integer',
+        'created_by' => 'integer',
         'exception_date' => 'date',
         'valid_from' => 'date',
         'valid_to' => 'date',
@@ -50,81 +58,213 @@ class TeacherAvailabilityException extends Model
 
     public function academicYear(): BelongsTo
     {
-        return $this->belongsTo(AcademicYear::class);
+        return $this->belongsTo(
+            AcademicYear::class,
+            'academic_year_id'
+        );
     }
 
     public function teacher(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'teacher_id');
+        return $this->belongsTo(
+            User::class,
+            'teacher_id'
+        );
     }
 
     public function bell(): BelongsTo
     {
-        return $this->belongsTo(SchoolBell::class, 'school_bell_id');
+        return $this->belongsTo(
+            SchoolBell::class,
+            'school_bell_id'
+        );
     }
 
     public function creator(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'created_by');
+        return $this->belongsTo(
+            User::class,
+            'created_by'
+        );
     }
 
     public function substitutions(): HasMany
     {
-        return $this->hasMany(TeacherSubstitution::class, 'teacher_availability_exception_id');
+        return $this->hasMany(
+            TeacherSubstitution::class,
+            'teacher_availability_exception_id'
+        );
     }
 
-    public function scopeActive($query)
+    public function activeSubstitutions(): HasMany
+    {
+        return $this->substitutions()
+            ->where('is_active', true);
+    }
+
+    public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
     }
 
-    public function scopeLeave($query)
+    public function scopeLeave(Builder $query): Builder
     {
-        return $query->where('status', self::STATUS_LEAVE);
+        return $query->where(
+            'status',
+            self::STATUS_LEAVE
+        );
     }
 
-    public function scopeForDate($query, $date)
-    {
-        return $query->whereDate('exception_date', $date);
+    public function scopeWithStatus(
+        Builder $query,
+        string $status
+    ): Builder {
+        return $query->where('status', $status);
     }
 
-    public function scopeForTeacher($query, int $teacherId)
-    {
-        return $query->where('teacher_id', $teacherId);
+    public function scopeForDate(
+        Builder $query,
+        string|\DateTimeInterface $date
+    ): Builder {
+        return $query->whereDate(
+            'exception_date',
+            $date
+        );
     }
 
-    public function scopeForSubscription($query, ?int $subscriptionId)
-    {
-        return $query->when($subscriptionId, fn ($q) => $q->where('subscription_id', $subscriptionId));
+    public function scopeForTeacher(
+        Builder $query,
+        int $teacherId
+    ): Builder {
+        return $query->where(
+            'teacher_id',
+            $teacherId
+        );
     }
 
-    public function scopeForAcademicYear($query, ?int $academicYearId)
+    public function scopeForBell(
+        Builder $query,
+        int $schoolBellId
+    ): Builder {
+        return $query->where(function (Builder $bellQuery) use ($schoolBellId) {
+            $bellQuery
+                ->where('is_full_day', true)
+                ->orWhere(
+                    'school_bell_id',
+                    $schoolBellId
+                );
+        });
+    }
+
+    public function scopeForSubscription(
+        Builder $query,
+        ?int $subscriptionId
+    ): Builder {
+        return $query->when(
+            $subscriptionId !== null,
+            fn (Builder $subscriptionQuery) => $subscriptionQuery->where(
+                'subscription_id',
+                $subscriptionId
+            )
+        );
+    }
+
+    public function scopeForAcademicYear(
+        Builder $query,
+        ?int $academicYearId
+    ): Builder {
+        return $query->when(
+            $academicYearId !== null,
+            fn (Builder $yearQuery) => $yearQuery->where(
+                'academic_year_id',
+                $academicYearId
+            )
+        );
+    }
+
+    public function scopeForSlot(
+        Builder $query,
+        int $teacherId,
+        string|\DateTimeInterface $date,
+        int $schoolBellId
+    ): Builder {
+        return $query
+            ->active()
+            ->forTeacher($teacherId)
+            ->forDate($date)
+            ->forBell($schoolBellId);
+    }
+
+    public function scopeRecurring(Builder $query): Builder
     {
-        return $query->when($academicYearId, fn ($q) => $q->where('academic_year_id', $academicYearId));
+        return $query->where('is_recurring', true);
+    }
+
+    public function scopeOrdered(Builder $query): Builder
+    {
+        return $query
+            ->orderBy('exception_date')
+            ->orderByDesc('is_full_day')
+            ->orderBy('school_bell_id')
+            ->orderBy('teacher_id')
+            ->orderBy('id');
+    }
+
+    public function hasStatus(string $status): bool
+    {
+        return $this->status === $status;
     }
 
     public function isLeave(): bool
     {
-        return $this->status === self::STATUS_LEAVE;
+        return $this->hasStatus(self::STATUS_LEAVE);
+    }
+
+    public function isExtraClass(): bool
+    {
+        return $this->hasStatus(
+            self::STATUS_EXTRA_CLASS
+        );
+    }
+
+    public function blocksRegularTeaching(): bool
+    {
+        return $this->is_active
+            && !$this->isExtraClass();
     }
 
     public function isBusy(): bool
     {
-        return ! $this->isLeave();
+        return $this->blocksRegularTeaching()
+            && !$this->isLeave();
     }
 
     public function isFullDay(): bool
     {
-        return (bool) $this->is_full_day;
+        return $this->is_full_day;
     }
 
     public function affectsBell(?int $bellId): bool
     {
+        if (!$this->is_active) {
+            return false;
+        }
+
         if ($this->isFullDay()) {
             return true;
         }
 
-        return (int) $this->school_bell_id === (int) $bellId;
+        return $bellId !== null
+            && $this->school_bell_id === $bellId;
+    }
+
+    public function displayReason(): ?string
+    {
+        $reason = trim(
+            (string) ($this->reason ?: $this->remarks)
+        );
+
+        return $reason !== '' ? $reason : null;
     }
 
     public static function statuses(): array
@@ -139,5 +279,15 @@ class TeacherAvailabilityException extends Model
             self::STATUS_BLOCKED,
             self::STATUS_EXTRA_CLASS,
         ];
+    }
+
+    public static function blockingStatuses(): array
+    {
+        return array_values(
+            array_diff(
+                self::statuses(),
+                [self::STATUS_EXTRA_CLASS]
+            )
+        );
     }
 }

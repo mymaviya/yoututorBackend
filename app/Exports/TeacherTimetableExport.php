@@ -17,44 +17,57 @@ class TeacherTimetableExport implements
     ShouldAutoSize
 {
     public function __construct(
+        protected int $subscriptionId,
         protected ?int $teacherId = null,
         protected ?int $academicYearId = null,
         protected ?int $gradeId = null,
         protected ?int $sectionId = null,
         protected ?int $streamId = null,
-        protected ?int $subscriptionId = null,
     ) {}
 
     public function collection(): Collection
     {
         return TeacherTimetable::query()
             ->with([
-                'teacher',
-                'grade',
-                'section',
-                'stream',
-                'subject',
-                'bell',
-                'timetableEntry.substituteTeacher',
+                'teacher:id,name,employee_code',
+                'grade:id,name',
+                'section:id,name',
+                'stream:id,name',
+                'subject:id,name',
+                'bell:id,title,start_time,end_time',
+                'timetableEntry:id,weekly_timetable_id,substitute_teacher_id,is_substitution,is_active',
+                'timetableEntry.substituteTeacher:id,name',
             ])
+            ->where('is_active', true)
+            ->whereHas(
+                'timetableEntry',
+                fn (Builder $entry) => $entry->where('is_active', true)
+            )
+            ->whereHas(
+                'timetableEntry.weeklyTimetable.template',
+                fn (Builder $template) => $template->where(
+                    'subscription_id',
+                    $this->subscriptionId
+                )
+            )
             ->when(
-                $this->teacherId,
+                $this->teacherId !== null,
                 fn (Builder $query) => $query->where('teacher_id', $this->teacherId)
             )
             ->when(
-                $this->gradeId,
+                $this->gradeId !== null,
                 fn (Builder $query) => $query->where('grade_id', $this->gradeId)
             )
             ->when(
-                $this->sectionId,
+                $this->sectionId !== null,
                 fn (Builder $query) => $query->where('section_id', $this->sectionId)
             )
             ->when(
-                $this->streamId,
+                $this->streamId !== null,
                 fn (Builder $query) => $query->where('stream_id', $this->streamId)
             )
             ->when(
-                $this->academicYearId,
+                $this->academicYearId !== null,
                 fn (Builder $query) => $query->whereHas(
                     'timetableEntry.weeklyTimetable',
                     fn (Builder $weekly) => $weekly->where(
@@ -63,17 +76,7 @@ class TeacherTimetableExport implements
                     )
                 )
             )
-            ->when(
-                $this->subscriptionId,
-                fn (Builder $query) => $query->whereHas(
-                    'timetableEntry.weeklyTimetable.template',
-                    fn (Builder $template) => $template->where(
-                        'subscription_id',
-                        $this->subscriptionId
-                    )
-                )
-            )
-            ->orderByRaw("
+            ->orderByRaw(<<<'SQL'
                 CASE weekday
                     WHEN 'Monday' THEN 1
                     WHEN 'Tuesday' THEN 2
@@ -83,7 +86,7 @@ class TeacherTimetableExport implements
                     WHEN 'Saturday' THEN 6
                     ELSE 7
                 END
-            ")
+                SQL)
             ->orderBy('school_bell_id')
             ->get();
     }

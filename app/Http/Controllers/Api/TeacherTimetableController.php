@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\AcademicPlanning\TeacherTimetableService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class TeacherTimetableController extends Controller
 {
@@ -15,36 +16,63 @@ class TeacherTimetableController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $subscriptionId = $this->subscriptionId();
+
         $data = $request->validate([
-            'mode' => ['nullable', 'in:teacher,class'],
-            'academic_year_id' => ['nullable', 'exists:academic_years,id'],
-            'teacher_id' => ['nullable', 'exists:users,id'],
-            'grade_id' => ['nullable', 'exists:grades,id'],
-            'section_id' => ['nullable', 'exists:sections,id'],
-            'stream_id' => ['nullable', 'exists:streams,id'],
+            'mode' => ['nullable', Rule::in(['teacher', 'class'])],
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'teacher_id' => [
+                Rule::requiredIf(
+                    fn () => $request->input('mode', 'teacher') === 'teacher'
+                ),
+                'nullable',
+                'integer',
+                Rule::exists('users', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'grade_id' => [
+                Rule::requiredIf(
+                    fn () => $request->input('mode', 'teacher') === 'class'
+                ),
+                'nullable',
+                'integer',
+                Rule::exists('grades', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'section_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('sections', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'stream_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('streams', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
         ]);
 
         $mode = $data['mode'] ?? 'teacher';
 
-        if ($mode === 'teacher') {
-            abort_if(empty($data['teacher_id']), 422, 'Teacher is required.');
-
-            $result = $this->service->teacherTimetable(
-                (int) $data['teacher_id'],
-                isset($data['academic_year_id']) ? (int) $data['academic_year_id'] : null,
-                $this->subscriptionId()
+        $result = $mode === 'teacher'
+            ? $this->service->teacherTimetable(
+                teacherId: (int) $data['teacher_id'],
+                academicYearId: $data['academic_year_id'] ?? null,
+                subscriptionId: $subscriptionId,
+            )
+            : $this->service->classTimetable(
+                gradeId: (int) $data['grade_id'],
+                sectionId: $data['section_id'] ?? null,
+                streamId: $data['stream_id'] ?? null,
+                academicYearId: $data['academic_year_id'] ?? null,
+                subscriptionId: $subscriptionId,
             );
-        } else {
-            abort_if(empty($data['grade_id']), 422, 'Grade is required.');
-
-            $result = $this->service->classTimetable(
-                (int) $data['grade_id'],
-                isset($data['section_id']) ? (int) $data['section_id'] : null,
-                isset($data['stream_id']) ? (int) $data['stream_id'] : null,
-                isset($data['academic_year_id']) ? (int) $data['academic_year_id'] : null,
-                $this->subscriptionId()
-            );
-        }
 
         return response()->json([
             'success' => true,
@@ -54,94 +82,176 @@ class TeacherTimetableController extends Controller
 
     public function teacher(Request $request, int $teacher): JsonResponse
     {
-        $data = $request->validate([
-            'academic_year_id' => ['nullable', 'exists:academic_years,id'],
+        $subscriptionId = $this->subscriptionId();
+
+        $request->validate([
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
         ]);
+
+        $this->validateRouteTeacher($teacher, $subscriptionId);
 
         return response()->json([
             'success' => true,
             'data' => $this->service->teacherTimetable(
-                $teacher,
-                isset($data['academic_year_id']) ? (int) $data['academic_year_id'] : null,
-                $this->subscriptionId()
+                teacherId: $teacher,
+                academicYearId: $request->integer('academic_year_id') ?: null,
+                subscriptionId: $subscriptionId,
             ),
         ]);
     }
 
     public function classTimetable(Request $request): JsonResponse
     {
+        $subscriptionId = $this->subscriptionId();
+
         $data = $request->validate([
-            'academic_year_id' => ['nullable', 'exists:academic_years,id'],
-            'grade_id' => ['required', 'exists:grades,id'],
-            'section_id' => ['nullable', 'exists:sections,id'],
-            'stream_id' => ['nullable', 'exists:streams,id'],
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'grade_id' => [
+                'required',
+                'integer',
+                Rule::exists('grades', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'section_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('sections', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'stream_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('streams', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
         ]);
 
         return response()->json([
             'success' => true,
             'data' => $this->service->classTimetable(
-                (int) $data['grade_id'],
-                isset($data['section_id']) ? (int) $data['section_id'] : null,
-                isset($data['stream_id']) ? (int) $data['stream_id'] : null,
-                isset($data['academic_year_id']) ? (int) $data['academic_year_id'] : null,
-                $this->subscriptionId()
+                gradeId: (int) $data['grade_id'],
+                sectionId: $data['section_id'] ?? null,
+                streamId: $data['stream_id'] ?? null,
+                academicYearId: $data['academic_year_id'] ?? null,
+                subscriptionId: $subscriptionId,
             ),
         ]);
     }
 
     public function today(Request $request): JsonResponse
     {
+        $subscriptionId = $this->subscriptionId();
+
         $data = $request->validate([
-            'academic_year_id' => ['nullable', 'exists:academic_years,id'],
-            'teacher_id' => ['nullable', 'exists:users,id'],
-            'grade_id' => ['nullable', 'exists:grades,id'],
-            'section_id' => ['nullable', 'exists:sections,id'],
-            'stream_id' => ['nullable', 'exists:streams,id'],
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'teacher_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('users', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'grade_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('grades', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'section_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('sections', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'stream_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('streams', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
         ]);
 
         return response()->json([
             'success' => true,
             'data' => $this->service->today(
-                isset($data['teacher_id']) ? (int) $data['teacher_id'] : null,
-                isset($data['grade_id']) ? (int) $data['grade_id'] : null,
-                isset($data['section_id']) ? (int) $data['section_id'] : null,
-                isset($data['stream_id']) ? (int) $data['stream_id'] : null,
-                isset($data['academic_year_id']) ? (int) $data['academic_year_id'] : null,
-                $this->subscriptionId()
+                teacherId: $data['teacher_id'] ?? null,
+                gradeId: $data['grade_id'] ?? null,
+                sectionId: $data['section_id'] ?? null,
+                streamId: $data['stream_id'] ?? null,
+                academicYearId: $data['academic_year_id'] ?? null,
+                subscriptionId: $subscriptionId,
             ),
         ]);
     }
 
     public function freePeriods(Request $request): JsonResponse
     {
+        $subscriptionId = $this->subscriptionId();
+
         $data = $request->validate([
-            'teacher_id' => ['required', 'exists:users,id'],
-            'academic_year_id' => ['nullable', 'exists:academic_years,id'],
+            'teacher_id' => [
+                'required',
+                'integer',
+                Rule::exists('users', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
         ]);
 
         return response()->json([
             'success' => true,
             'data' => $this->service->freePeriods(
-                (int) $data['teacher_id'],
-                isset($data['academic_year_id']) ? (int) $data['academic_year_id'] : null,
-                $this->subscriptionId()
+                teacherId: (int) $data['teacher_id'],
+                academicYearId: $data['academic_year_id'] ?? null,
+                subscriptionId: $subscriptionId,
             ),
         ]);
     }
 
     public function workload(Request $request): JsonResponse
     {
+        $subscriptionId = $this->subscriptionId();
+
         $data = $request->validate([
-            'teacher_id' => ['required', 'exists:users,id'],
-            'academic_year_id' => ['nullable', 'exists:academic_years,id'],
+            'teacher_id' => [
+                'required',
+                'integer',
+                Rule::exists('users', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')
+                    ->where('subscription_id', $subscriptionId),
+            ],
         ]);
 
         return response()->json([
             'success' => true,
             'data' => $this->service->workload(
-                (int) $data['teacher_id'],
-                isset($data['academic_year_id']) ? (int) $data['academic_year_id'] : null,
-                $this->subscriptionId()
+                teacherId: (int) $data['teacher_id'],
+                academicYearId: $data['academic_year_id'] ?? null,
+                subscriptionId: $subscriptionId,
             ),
         ]);
     }
@@ -156,9 +266,32 @@ class TeacherTimetableController extends Controller
         return $this->index($request);
     }
 
-    private function subscriptionId(): ?int
+    private function subscriptionId(): int
     {
-        return auth()->user()?->subscription_id
+        $subscriptionId = $requestUserSubscriptionId = auth()->user()?->subscription_id
             ?? auth()->user()?->subscription?->id;
+
+        abort_if(
+            ! is_numeric($subscriptionId) || (int) $subscriptionId <= 0,
+            403,
+            'A valid subscription is required.'
+        );
+
+        return (int) $requestUserSubscriptionId;
+    }
+
+    private function validateRouteTeacher(int $teacherId, int $subscriptionId): void
+    {
+        validator(
+            ['teacher_id' => $teacherId],
+            [
+                'teacher_id' => [
+                    'required',
+                    'integer',
+                    Rule::exists('users', 'id')
+                        ->where('subscription_id', $subscriptionId),
+                ],
+            ]
+        )->validate();
     }
 }

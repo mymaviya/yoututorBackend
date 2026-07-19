@@ -647,31 +647,38 @@ Route::middleware([
             Route::apiResource('/', TeacherAvailabilityController::class);
         });
 
-        Route::prefix('teacher-timetable')->group(function () {
-            Route::get('/', [TeacherTimetableController::class, 'index'])
-                ->name('teacher.timetable.index');
+        Route::prefix('teacher-timetable')
+            ->name('teacher.timetable.')
+            ->group(function () {
+                /*
+         * Static routes are declared before parameterised routes so future
+         * route additions cannot accidentally be captured as a teacher ID.
+         */
+                Route::get('/', [TeacherTimetableController::class, 'index'])
+                    ->name('index');
 
-            Route::get('/teacher/{teacher}', [TeacherTimetableController::class, 'teacher'])
-                ->name('teacher.timetable.teacher');
+                Route::get('/class', [TeacherTimetableController::class, 'classTimetable'])
+                    ->name('class');
 
-            Route::get('/class', [TeacherTimetableController::class, 'classTimetable'])
-                ->name('teacher.timetable.class');
+                Route::get('/today', [TeacherTimetableController::class, 'today'])
+                    ->name('today');
 
-            Route::get('/today', [TeacherTimetableController::class, 'today'])
-                ->name('teacher.timetable.today');
+                Route::get('/free-periods', [TeacherTimetableController::class, 'freePeriods'])
+                    ->name('free-periods');
 
-            Route::get('/free-periods', [TeacherTimetableController::class, 'freePeriods'])
-                ->name('teacher.timetable.free-periods');
+                Route::get('/workload', [TeacherTimetableController::class, 'workload'])
+                    ->name('workload');
 
-            Route::get('/workload', [TeacherTimetableController::class, 'workload'])
-                ->name('teacher.timetable.workload');
+                Route::get('/export', [TeacherTimetableExportController::class, 'export'])
+                    ->name('export');
 
-            Route::get('/export', [TeacherTimetableExportController::class, 'export'])
-                ->name('teacher.timetable.export');
+                Route::get('/print', [TeacherTimetablePrintController::class, 'print'])
+                    ->name('print');
 
-            Route::get('/print', [TeacherTimetablePrintController::class, 'print'])
-                ->name('teacher.timetable.print');
-        });
+                Route::get('/teacher/{teacher}', [TeacherTimetableController::class, 'teacher'])
+                    ->whereNumber('teacher')
+                    ->name('teacher');
+            });
 
         Route::prefix('teacher-availability-exceptions')->group(function () {
             Route::get('/dashboard', [TeacherAvailabilityExceptionController::class, 'dashboard'])

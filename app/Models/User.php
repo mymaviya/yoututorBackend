@@ -4,7 +4,12 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToSubscription;
 use Database\Factories\UserFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -48,6 +53,10 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
+            'id' => 'integer',
+            'role_id' => 'integer',
+            'subscription_id' => 'integer',
+            'session_timeout_minutes' => 'integer',
             'password' => 'hashed',
             'is_active' => 'boolean',
             'login_enabled' => 'boolean',
@@ -60,79 +69,181 @@ class User extends Authenticatable
         ];
     }
 
-    public function roleData()
+    public function roleData(): BelongsTo
     {
         return $this->belongsTo(Role::class, 'role_id');
     }
 
-    public function permissions()
+    public function permissions(): BelongsToMany
     {
-        return $this->belongsToMany(Permission::class, 'user_permissions')->withPivot('allowed');
+        return $this->belongsToMany(
+            Permission::class,
+            'user_permissions'
+        )->withPivot('allowed');
     }
 
-    public function teacherAssignments()
+    public function teacherAssignments(): HasMany
     {
-        return $this->hasMany(TeacherAssignment::class, 'teacher_id');
+        return $this->hasMany(
+            TeacherAssignment::class,
+            'teacher_id'
+        );
     }
 
-    public function teacherGrades()
+    public function teacherGrades(): HasMany
     {
-        return $this->hasMany(TeacherGrade::class, 'teacher_id');
+        return $this->hasMany(
+            TeacherGrade::class,
+            'teacher_id'
+        );
     }
 
-    public function questionTasks()
+    public function questionTasks(): HasMany
     {
-        return $this->hasMany(TeacherQuestionTask::class, 'teacher_id');
+        return $this->hasMany(
+            TeacherQuestionTask::class,
+            'teacher_id'
+        );
     }
 
-    public function devices()
+    public function devices(): HasMany
     {
         return $this->hasMany(UserDevice::class);
     }
 
-    public function notifications()
+    public function notifications(): HasMany
     {
         return $this->hasMany(AppNotification::class);
     }
 
+    public function timetableEntries(): HasMany
+    {
+        return $this->hasMany(
+            TimetableEntry::class,
+            'teacher_id'
+        );
+    }
+
+    public function activeTimetableEntries(): HasMany
+    {
+        return $this->timetableEntries()
+            ->where('is_active', true);
+    }
+
+    public function substituteTimetableEntries(): HasMany
+    {
+        return $this->hasMany(
+            TimetableEntry::class,
+            'substitute_teacher_id'
+        );
+    }
+
+    public function teacherAvailabilities(): HasMany
+    {
+        return $this->hasMany(
+            TeacherAvailability::class,
+            'teacher_id'
+        );
+    }
+
+    public function activeTeacherAvailabilities(): HasMany
+    {
+        return $this->teacherAvailabilities()
+            ->where('is_active', true);
+    }
+
+    public function parallelGroupItems(): HasMany
+    {
+        return $this->hasMany(
+            ParallelGroupItem::class,
+            'teacher_id'
+        );
+    }
+
     public function hasPermission($permission)
     {
-        $direct = $this->permissions()->where('slug', $permission)->first();
+        $direct = $this->permissions()
+            ->where('slug', $permission)
+            ->first();
 
         if ($direct) {
             return (bool) $direct->pivot->allowed;
         }
 
-        return $this->roleData?->permissions()->where('slug', $permission)->exists();
+        return $this->roleData?->permissions()
+            ->where('slug', $permission)
+            ->exists();
     }
 
-    public function role()
+    public function role(): BelongsTo
     {
         return $this->belongsTo(Role::class);
     }
 
-    public function scopeTeachers($query)
+    public function scopeTeachers(Builder $query): Builder
     {
-        return $query->whereHas('role', function ($q) {
-            $q->where('slug', 'teacher');
-        });
+        return $query->whereHas(
+            'role',
+            fn (Builder $roleQuery) => $roleQuery->where(
+                'slug',
+                'teacher'
+            )
+        );
     }
 
-    public function subscription()
+    public function scopeActive(Builder $query): Builder
     {
-        return $this->belongsTo(Subscription::class);
+        return $query->where('is_active', true);
     }
 
-    public function teacherProfile()
+    public function scopeActiveTeachers(Builder $query): Builder
     {
-        return $this->hasOne(TeacherProfile::class);
+        return $query->teachers()->active();
+    }
+
+    public function scopeAvailableForTimetable(
+        Builder $query
+    ): Builder {
+        return $query
+            ->activeTeachers()
+            ->where(function (Builder $loginQuery) {
+                $loginQuery
+                    ->whereNull('login_enabled')
+                    ->orWhere('login_enabled', true);
+            });
+    }
+
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(
+            Subscription::class,
+            'subscription_id'
+        );
+    }
+
+    public function teacherProfile(): HasOne
+    {
+        return $this->hasOne(
+            TeacherProfile::class,
+            'user_id'
+        );
+    }
+
+    public function isTeacher(): bool
+    {
+        $role = $this->roleData?->slug ?? $this->role;
+
+        return $role === 'teacher';
     }
 
     public function isSuperAdmin(): bool
     {
         $role = $this->roleData?->slug ?? $this->role;
 
-        return in_array($role, ['superadmin', 'super_admin'], true);
+        return in_array(
+            $role,
+            ['superadmin', 'super_admin'],
+            true
+        );
     }
-
 }
