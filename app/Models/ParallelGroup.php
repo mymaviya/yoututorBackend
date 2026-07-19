@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,7 +10,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ParallelGroup extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
+        'subscription_id',
         'grade_id',
         'name',
         'same_period_required',
@@ -24,6 +28,7 @@ class ParallelGroup extends Model
 
     protected $casts = [
         'id' => 'integer',
+        'subscription_id' => 'integer',
         'grade_id' => 'integer',
         'same_period_required' => 'boolean',
         'period_number_fixed' => 'boolean',
@@ -35,6 +40,11 @@ class ParallelGroup extends Model
         'is_active' => 'boolean',
     ];
 
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
     public function grade(): BelongsTo
     {
         return $this->belongsTo(Grade::class, 'grade_id');
@@ -42,10 +52,7 @@ class ParallelGroup extends Model
 
     public function items(): HasMany
     {
-        return $this->hasMany(
-            ParallelGroupItem::class,
-            'parallel_group_id'
-        );
+        return $this->hasMany(ParallelGroupItem::class, 'parallel_group_id');
     }
 
     public function activeItems(): HasMany
@@ -55,16 +62,12 @@ class ParallelGroup extends Model
 
     public function timetableEntries(): HasMany
     {
-        return $this->hasMany(
-            TimetableEntry::class,
-            'parallel_group_id'
-        );
+        return $this->hasMany(TimetableEntry::class, 'parallel_group_id');
     }
 
     public function activeTimetableEntries(): HasMany
     {
-        return $this->timetableEntries()
-            ->where('is_active', true);
+        return $this->timetableEntries()->where('is_active', true);
     }
 
     public function scopeActive(Builder $query): Builder
@@ -72,10 +75,8 @@ class ParallelGroup extends Model
         return $query->where('is_active', true);
     }
 
-    public function scopeForGrade(
-        Builder $query,
-        int $gradeId
-    ): Builder {
+    public function scopeForGrade(Builder $query, int $gradeId): Builder
+    {
         return $query->where('grade_id', $gradeId);
     }
 
@@ -84,9 +85,8 @@ class ParallelGroup extends Model
         return $query->where('period_number_fixed', true);
     }
 
-    public function scopeSamePeriodRequired(
-        Builder $query
-    ): Builder {
+    public function scopeSamePeriodRequired(Builder $query): Builder
+    {
         return $query->where('same_period_required', true);
     }
 
@@ -97,8 +97,7 @@ class ParallelGroup extends Model
 
     public function requiresFixedPeriod(): bool
     {
-        return $this->period_number_fixed
-            && $this->hasPreferredPeriod();
+        return $this->period_number_fixed && $this->hasPreferredPeriod();
     }
 
     public function preferenceFlags(): array
