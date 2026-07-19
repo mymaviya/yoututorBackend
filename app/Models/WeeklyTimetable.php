@@ -13,6 +13,15 @@ class WeeklyTimetable extends Model
 {
     use BelongsToSubscription;
 
+    public const STATUS_DRAFT = 'draft';
+    public const STATUS_PUBLISHED = 'published';
+    public const STATUS_ARCHIVED = 'archived';
+    public const STATUSES = [
+        self::STATUS_DRAFT,
+        self::STATUS_PUBLISHED,
+        self::STATUS_ARCHIVED,
+    ];
+
     protected $fillable = [
         'subscription_id',
         'academic_year_id',
@@ -24,6 +33,11 @@ class WeeklyTimetable extends Model
         'effective_from',
         'is_active',
         'is_generated',
+        'status',
+        'version',
+        'published_at',
+        'published_by',
+        'archived_at',
     ];
 
     protected $casts = [
@@ -34,14 +48,29 @@ class WeeklyTimetable extends Model
         'section_id' => 'integer',
         'stream_id' => 'integer',
         'timetable_template_id' => 'integer',
+        'version' => 'integer',
+        'published_by' => 'integer',
         'effective_from' => 'date',
+        'published_at' => 'datetime',
+        'archived_at' => 'datetime',
         'is_active' => 'boolean',
         'is_generated' => 'boolean',
     ];
 
     protected static function booted(): void
     {
+        static::creating(function (WeeklyTimetable $timetable): void {
+            $timetable->status ??= self::STATUS_DRAFT;
+            $timetable->version ??= 1;
+        });
+
         static::saving(function (WeeklyTimetable $timetable): void {
+            if (! in_array($timetable->status ?? self::STATUS_DRAFT, self::STATUSES, true)) {
+                throw ValidationException::withMessages([
+                    'status' => 'The timetable lifecycle status is invalid.',
+                ]);
+            }
+
             if (! $timetable->timetable_template_id) {
                 return;
             }
@@ -110,6 +139,11 @@ class WeeklyTimetable extends Model
         return $this->belongsTo(TimetableTemplate::class, 'timetable_template_id');
     }
 
+    public function publisher(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'published_by');
+    }
+
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
@@ -120,6 +154,21 @@ class WeeklyTimetable extends Model
         return $query->where('is_generated', true);
     }
 
+    public function scopeDraft(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_DRAFT);
+    }
+
+    public function scopePublished(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_PUBLISHED);
+    }
+
+    public function scopeArchived(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_ARCHIVED);
+    }
+
     public function scopeEffectiveOn(
         Builder $query,
         string|\DateTimeInterface|null $date = null
@@ -127,10 +176,8 @@ class WeeklyTimetable extends Model
         return $query->whereDate('effective_from', '<=', $date ?? now());
     }
 
-    public function scopeForAcademicYear(
-        Builder $query,
-        int $academicYearId
-    ): Builder {
+    public function scopeForAcademicYear(Builder $query, int $academicYearId): Builder
+    {
         return $query->where('academic_year_id', $academicYearId);
     }
 
@@ -152,10 +199,8 @@ class WeeklyTimetable extends Model
             );
     }
 
-    public function scopeForSubscription(
-        Builder $query,
-        int $subscriptionId
-    ): Builder {
+    public function scopeForSubscription(Builder $query, int $subscriptionId): Builder
+    {
         return $query->where('subscription_id', $subscriptionId);
     }
 
@@ -164,8 +209,25 @@ class WeeklyTimetable extends Model
         return $query
             ->active()
             ->generated()
+            ->published()
             ->effectiveOn()
             ->orderByDesc('effective_from')
+            ->orderByDesc('version')
             ->orderByDesc('id');
+    }
+
+    public function isDraft(): bool
+    {
+        return $this->status === self::STATUS_DRAFT;
+    }
+
+    public function isPublished(): bool
+    {
+        return $this->status === self::STATUS_PUBLISHED;
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->status === self::STATUS_ARCHIVED;
     }
 }
