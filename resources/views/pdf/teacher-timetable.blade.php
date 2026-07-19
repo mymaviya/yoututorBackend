@@ -4,9 +4,7 @@
     <meta charset="utf-8">
 
     <style>
-        @page {
-            margin: 18px;
-        }
+        @page { margin: 18px; }
 
         body {
             font-family: DejaVu Sans, sans-serif;
@@ -14,8 +12,7 @@
             color: #222;
         }
 
-        h2,
-        h4 {
+        h2, h4 {
             margin: 0;
             padding: 0;
             text-align: center;
@@ -26,23 +23,19 @@
             font-weight: normal;
         }
 
-        .meta,
-        .summary {
+        .meta, .summary {
             width: 100%;
             margin-top: 10px;
             border-collapse: collapse;
         }
 
-        .meta td,
-        .summary td {
+        .meta td, .summary td {
             border: 1px solid #bbb;
             padding: 5px 7px;
             text-align: left;
         }
 
-        .summary td {
-            text-align: center;
-        }
+        .summary td { text-align: center; }
 
         .summary strong {
             display: block;
@@ -56,8 +49,7 @@
             table-layout: fixed;
         }
 
-        .timetable th,
-        .timetable td {
+        .timetable th, .timetable td {
             border: 1px solid #444;
             padding: 5px;
             text-align: center;
@@ -65,40 +57,34 @@
             word-wrap: break-word;
         }
 
-        .timetable th {
-            background: #efefef;
-        }
-
-        .period {
-            width: 11%;
-        }
+        .timetable th { background: #efefef; }
+        .period { width: 11%; }
 
         .subject {
             font-weight: bold;
             font-size: 9.5px;
         }
 
-        .details {
+        .details, .room, .substitution {
             margin-top: 2px;
             font-size: 8px;
         }
 
-        .room {
-            margin-top: 2px;
-            font-size: 8px;
-            color: #555;
-        }
+        .room { color: #555; }
 
         .substitution {
             margin-top: 3px;
-            font-size: 8px;
             color: #b71c1c;
             font-weight: bold;
         }
 
-        .empty {
-            color: #aaa;
+        .original-teacher {
+            margin-top: 2px;
+            font-size: 7.5px;
+            color: #666;
         }
+
+        .empty { color: #aaa; }
 
         .footer {
             margin-top: 10px;
@@ -108,42 +94,31 @@
         }
     </style>
 </head>
-
 <body>
     @php
-        $days = [
-            'Monday',
-            'Tuesday',
-            'Wednesday',
-            'Thursday',
-            'Friday',
-            'Saturday',
-        ];
-
+        $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
         $mode = $mode ?? (isset($teacher) ? 'teacher' : 'class');
         $filters = $filters ?? [];
         $summary = $summary ?? [];
+        $entryCollection = collect($entries ?? []);
 
-        $entryCollection = collect($entries);
+        $entriesBySlot = $entryCollection->keyBy(function ($entry) {
+            $weekday = data_get($entry, 'weekday');
+            $bellId = data_get($entry, 'school_bell_id');
 
-        $entriesBySlot = $entryCollection->keyBy(
-            fn ($entry) => $entry->weekday . '-' . $entry->school_bell_id
-        );
+            return strtolower((string) $weekday) . '-' . $bellId;
+        });
 
         $firstEntry = $entryCollection->first();
-
         $className = collect([
-            $firstEntry?->grade?->name,
-            $firstEntry?->section?->name,
-            $firstEntry?->stream?->name,
+            data_get($firstEntry, 'grade.name'),
+            data_get($firstEntry, 'section.name'),
+            data_get($firstEntry, 'stream.name'),
         ])->filter()->implode(' - ');
 
-        $title = $mode === 'teacher'
-            ? 'Teacher Timetable'
-            : 'Class Timetable';
-
+        $title = $mode === 'teacher' ? 'Teacher Timetable' : 'Class Timetable';
         $subtitle = $mode === 'teacher'
-            ? ($teacher?->name ?? 'Selected Teacher')
+            ? (data_get($teacher ?? null, 'name') ?? 'Selected Teacher')
             : ($className ?: 'Selected Class');
     @endphp
 
@@ -152,15 +127,8 @@
 
     <table class="meta">
         <tr>
-            <td>
-                <strong>Mode:</strong>
-                {{ ucfirst($mode) }}
-            </td>
-
-            <td>
-                <strong>Generated:</strong>
-                {{ now()->format('d M Y, h:i A') }}
-            </td>
+            <td><strong>Mode:</strong> {{ ucfirst($mode) }}</td>
+            <td><strong>Generated:</strong> {{ now()->format('d M Y, h:i A') }}</td>
 
             @if (! empty($filters['academic_year_id']))
                 <td>
@@ -177,17 +145,14 @@
                 <strong>{{ $summary['weekly_periods'] ?? $entryCollection->count() }}</strong>
                 Weekly Periods
             </td>
-
             <td>
                 <strong>{{ $summary['free_periods'] ?? 0 }}</strong>
                 Free Periods
             </td>
-
             <td>
                 <strong>{{ $summary['subjects'] ?? 0 }}</strong>
                 Subjects
             </td>
-
             <td>
                 <strong>{{ $summary['substitutions'] ?? 0 }}</strong>
                 Substitutions
@@ -199,7 +164,6 @@
         <thead>
             <tr>
                 <th class="period">Period</th>
-
                 @foreach ($days as $day)
                     <th>{{ $day }}</th>
                 @endforeach
@@ -207,63 +171,71 @@
         </thead>
 
         <tbody>
-            @forelse ($bells as $bell)
+            @forelse (collect($bells ?? []) as $bell)
                 <tr>
                     <td class="period">
-                        <strong>{{ $bell->title }}</strong>
+                        <strong>{{ data_get($bell, 'display_title', data_get($bell, 'title', 'Period')) }}</strong>
 
-                        @if ($bell->start_time || $bell->end_time)
-                            <br>
-                            {{ $bell->start_time ?? '' }}
-                            @if ($bell->start_time && $bell->end_time)
-                                -
-                            @endif
-                            {{ $bell->end_time ?? '' }}
+                        @php
+                            $displayTime = data_get($bell, 'display_time');
+                        @endphp
+
+                        @if ($displayTime && $displayTime !== '—')
+                            <br>{{ $displayTime }}
                         @endif
                     </td>
 
                     @foreach ($days as $day)
                         @php
-                            $entry = $entriesBySlot->get($day . '-' . $bell->id);
-                            $isSubstitution = (bool) optional(
-                                $entry?->timetableEntry
-                            )->is_substitution;
-                            $substituteTeacher = $entry?->timetableEntry
-                                ?->substituteTeacher?->name;
+                            $entry = $entriesBySlot->get(strtolower($day) . '-' . data_get($bell, 'id'));
+                            $isSubstitution = (bool) (
+                                data_get($entry, 'is_substitution')
+                                ?? data_get($entry, 'timetableEntry.is_substitution')
+                                ?? false
+                            );
+                            $originalTeacherName = data_get($entry, 'teacher.name');
+                            $substituteTeacherName = data_get($entry, 'substitute_teacher.name')
+                                ?? data_get($entry, 'timetableEntry.substituteTeacher.name');
+                            $effectiveTeacherName = $isSubstitution && $substituteTeacherName
+                                ? $substituteTeacherName
+                                : $originalTeacherName;
                         @endphp
 
                         <td>
                             @if ($entry)
                                 <div class="subject">
-                                    {{ $entry->subject?->name ?? '-' }}
+                                    {{ data_get($entry, 'subject.name', '-') }}
                                 </div>
 
                                 @if ($mode === 'teacher')
                                     <div class="details">
                                         {{ collect([
-                                            $entry->grade?->name,
-                                            $entry->section?->name,
-                                            $entry->stream?->name,
-                                        ])->filter()->implode(' - ') }}
+                                            data_get($entry, 'grade.name'),
+                                            data_get($entry, 'section.name'),
+                                            data_get($entry, 'stream.name'),
+                                        ])->filter()->implode(' - ') ?: '-' }}
                                     </div>
                                 @else
                                     <div class="details">
-                                        {{ $entry->teacher?->name ?? '-' }}
+                                        {{ $effectiveTeacherName ?: '-' }}
                                     </div>
+
+                                    @if ($isSubstitution && $originalTeacherName && $originalTeacherName !== $effectiveTeacherName)
+                                        <div class="original-teacher">
+                                            Original: {{ $originalTeacherName }}
+                                        </div>
+                                    @endif
                                 @endif
 
-                                @if ($entry->room_no)
+                                @if (data_get($entry, 'room_no'))
                                     <div class="room">
-                                        Room: {{ $entry->room_no }}
+                                        Room: {{ data_get($entry, 'room_no') }}
                                     </div>
                                 @endif
 
                                 @if ($isSubstitution)
                                     <div class="substitution">
-                                        Substitution
-                                        @if ($substituteTeacher)
-                                            — {{ $substituteTeacher }}
-                                        @endif
+                                        Substitute{{ $substituteTeacherName ? ': ' . $substituteTeacherName : '' }}
                                     </div>
                                 @endif
                             @else
@@ -274,16 +246,12 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="7">
-                        No active teaching periods are configured.
-                    </td>
+                    <td colspan="7">No active teaching periods are configured.</td>
                 </tr>
             @endforelse
         </tbody>
     </table>
 
-    <div class="footer">
-        Generated by YouTutor ERP
-    </div>
+    <div class="footer">Generated by YouTutor ERP</div>
 </body>
 </html>
