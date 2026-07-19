@@ -14,4 +14,6 @@ Route::prefix('timetable-generation-runs')
             ->name('conflicts');
         Route::post('/{timetableGenerationRun}/retry', [TimetableGenerationRunController::class, 'retry'])
             ->name('retry');
+        Route::post('/{timetableGenerationRun}/cancel', [TimetableGenerationRunController::class, 'cancel'])
+            ->name('cancel');
     });
