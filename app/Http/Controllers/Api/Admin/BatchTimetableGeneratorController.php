@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Services\AcademicPlanning\BatchTimetableGeneratorService;
+use App\Services\AcademicPlanning\TimetableGenerationRunService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -11,19 +11,21 @@ use Illuminate\Validation\Rule;
 class BatchTimetableGeneratorController extends Controller
 {
     public function __construct(
-        protected BatchTimetableGeneratorService $service
+        protected TimetableGenerationRunService $service
     ) {}
 
     public function preview(Request $request): JsonResponse
     {
         $subscriptionId = $this->subscriptionId($request);
+        $data = $this->validatedData($request, $subscriptionId);
 
         return response()->json([
             'success' => true,
             'message' => 'Batch timetable preview completed.',
-            'data' => $this->service->generate(
+            'data' => $this->service->executeBatch(
                 $subscriptionId,
-                $this->validatedData($request, $subscriptionId),
+                $request->user()?->id,
+                $data,
                 true
             ),
         ]);
@@ -32,13 +34,15 @@ class BatchTimetableGeneratorController extends Controller
     public function generate(Request $request): JsonResponse
     {
         $subscriptionId = $this->subscriptionId($request);
+        $data = $this->validatedData($request, $subscriptionId);
 
         return response()->json([
             'success' => true,
             'message' => 'Batch timetable generation completed.',
-            'data' => $this->service->generate(
+            'data' => $this->service->executeBatch(
                 $subscriptionId,
-                $this->validatedData($request, $subscriptionId),
+                $request->user()?->id,
+                $data,
                 false
             ),
         ], 201);
