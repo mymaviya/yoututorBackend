@@ -8,6 +8,7 @@ use App\Http\Requests\UpdateTeacherAvailabilityRequest;
 use App\Services\TeacherAvailability\TeacherAvailabilityService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class TeacherAvailabilityController extends Controller
 {
@@ -16,37 +17,41 @@ class TeacherAvailabilityController extends Controller
     ) {}
 
     /**
-     * Get teacher weekly availability.
+     * Get a teacher's weekly availability.
      */
     public function index(Request $request): JsonResponse
     {
+        $subscriptionId = (int) $request->user()->subscription_id;
+
         $validated = $request->validate([
-            'teacher_id' => ['required', 'integer'],
-            'academic_year_id' => ['required', 'integer'],
+            'teacher_id' => $this->teacherRules($subscriptionId),
+            'academic_year_id' => $this->academicYearRules($subscriptionId),
         ]);
 
         return response()->json([
             'success' => true,
             'data' => $this->service->getWeeklyAvailability(
-                auth()->user()->subscription_id,
-                $validated['academic_year_id'],
-                $validated['teacher_id']
+                $subscriptionId,
+                (int) $validated['academic_year_id'],
+                (int) $validated['teacher_id']
             ),
         ]);
     }
 
     /**
-     * Store availability.
+     * Store a teacher's complete weekly availability grid.
      */
     public function store(
         StoreTeacherAvailabilityRequest $request
     ): JsonResponse {
+        $validated = $request->validated();
+        $subscriptionId = (int) $request->user()->subscription_id;
 
         $availability = $this->service->saveWeeklyAvailability(
-            auth()->user()->subscription_id,
-            $request->academic_year_id,
-            $request->teacher_id,
-            $request->availability
+            $subscriptionId,
+            (int) $validated['academic_year_id'],
+            (int) $validated['teacher_id'],
+            $validated['availability']
         );
 
         return response()->json([
@@ -57,18 +62,26 @@ class TeacherAvailabilityController extends Controller
     }
 
     /**
-     * Update availability.
+     * Update a teacher's complete weekly availability grid.
      */
     public function update(
         UpdateTeacherAvailabilityRequest $request,
         int $teacherId
     ): JsonResponse {
+        $subscriptionId = (int) $request->user()->subscription_id;
+
+        validator(
+            ['teacher_id' => $teacherId],
+            ['teacher_id' => $this->teacherRules($subscriptionId)]
+        )->validate();
+
+        $validated = $request->validated();
 
         $availability = $this->service->saveWeeklyAvailability(
-            auth()->user()->subscription_id,
-            $request->academic_year_id,
+            $subscriptionId,
+            (int) $validated['academic_year_id'],
             $teacherId,
-            $request->availability
+            $validated['availability']
         );
 
         return response()->json([
@@ -79,21 +92,26 @@ class TeacherAvailabilityController extends Controller
     }
 
     /**
-     * Copy one teacher availability to another.
+     * Copy one teacher's availability to another teacher.
      */
     public function copy(Request $request): JsonResponse
     {
+        $subscriptionId = (int) $request->user()->subscription_id;
+
         $validated = $request->validate([
-            'academic_year_id' => ['required', 'integer'],
-            'source_teacher_id' => ['required', 'integer'],
-            'destination_teacher_id' => ['required', 'integer'],
+            'academic_year_id' => $this->academicYearRules($subscriptionId),
+            'source_teacher_id' => $this->teacherRules($subscriptionId),
+            'destination_teacher_id' => [
+                ...$this->teacherRules($subscriptionId),
+                'different:source_teacher_id',
+            ],
         ]);
 
         $availability = $this->service->copyAvailability(
-            auth()->user()->subscription_id,
-            $validated['academic_year_id'],
-            $validated['source_teacher_id'],
-            $validated['destination_teacher_id']
+            $subscriptionId,
+            (int) $validated['academic_year_id'],
+            (int) $validated['source_teacher_id'],
+            (int) $validated['destination_teacher_id']
         );
 
         return response()->json([
@@ -104,23 +122,25 @@ class TeacherAvailabilityController extends Controller
     }
 
     /**
-     * Create default availability.
+     * Create default availability for all requested teaching slots.
      */
     public function generateDefault(Request $request): JsonResponse
     {
+        $subscriptionId = (int) $request->user()->subscription_id;
+
         $validated = $request->validate([
-            'teacher_id' => ['required', 'integer'],
-            'academic_year_id' => ['required', 'integer'],
+            'teacher_id' => $this->teacherRules($subscriptionId),
+            'academic_year_id' => $this->academicYearRules($subscriptionId),
             'working_days' => ['required', 'integer', 'between:1,7'],
             'periods_per_day' => ['required', 'integer', 'between:1,20'],
         ]);
 
         $availability = $this->service->createDefaultAvailability(
-            auth()->user()->subscription_id,
-            $validated['academic_year_id'],
-            $validated['teacher_id'],
-            $validated['working_days'],
-            $validated['periods_per_day']
+            $subscriptionId,
+            (int) $validated['academic_year_id'],
+            (int) $validated['teacher_id'],
+            (int) $validated['working_days'],
+            (int) $validated['periods_per_day']
         );
 
         return response()->json([
@@ -131,17 +151,24 @@ class TeacherAvailabilityController extends Controller
     }
 
     /**
-     * Delete teacher availability.
+     * Delete a teacher's complete weekly availability grid.
      */
     public function destroy(Request $request, int $teacherId): JsonResponse
     {
+        $subscriptionId = (int) $request->user()->subscription_id;
+
+        validator(
+            ['teacher_id' => $teacherId],
+            ['teacher_id' => $this->teacherRules($subscriptionId)]
+        )->validate();
+
         $validated = $request->validate([
-            'academic_year_id' => ['required', 'integer'],
+            'academic_year_id' => $this->academicYearRules($subscriptionId),
         ]);
 
         $this->service->resetAvailability(
-            auth()->user()->subscription_id,
-            $validated['academic_year_id'],
+            $subscriptionId,
+            (int) $validated['academic_year_id'],
             $teacherId
         );
 
@@ -149,5 +176,37 @@ class TeacherAvailabilityController extends Controller
             'success' => true,
             'message' => 'Teacher availability deleted successfully.',
         ]);
+    }
+
+    /**
+     * Validate an active teacher inside the authenticated subscription.
+     */
+    private function teacherRules(int $subscriptionId): array
+    {
+        return [
+            'required',
+            'integer',
+            Rule::exists('users', 'id')->where(
+                fn ($query) => $query
+                    ->where('subscription_id', $subscriptionId)
+                    ->where('is_active', true)
+            ),
+        ];
+    }
+
+    /**
+     * Validate an active academic year inside the authenticated subscription.
+     */
+    private function academicYearRules(int $subscriptionId): array
+    {
+        return [
+            'required',
+            'integer',
+            Rule::exists('academic_years', 'id')->where(
+                fn ($query) => $query
+                    ->where('subscription_id', $subscriptionId)
+                    ->where('is_active', true)
+            ),
+        ];
     }
 }
