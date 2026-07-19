@@ -5,48 +5,63 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\SchoolBell;
 use App\Models\TeacherAvailabilityException;
-use App\Models\TeacherSubstitution;
 use App\Models\User;
 use App\Services\AcademicPlanning\MoveTeacherAvailabilityExceptionService;
-use App\Services\AcademicPlanning\AutoSubstitutionGeneratorService;
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class TeacherAvailabilityExceptionController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
-        $subscriptionId = $this->subscriptionId();
+        $subscriptionId = $this->subscriptionId($request);
 
-        $query = TeacherAvailabilityException::with(['teacher', 'bell', 'academicYear'])
-            ->where('subscription_id', $subscriptionId);
+        $validated = $request->validate([
+            'teacher_id' => ['nullable', ...$this->teacherRules($subscriptionId)],
+            'status' => ['nullable', Rule::in(TeacherAvailabilityException::statuses())],
+            'from_date' => ['nullable', 'date'],
+            'to_date' => ['nullable', 'date', 'after_or_equal:from_date'],
+            'per_page' => ['nullable', 'integer', 'between:1,100'],
+        ]);
 
-        if ($request->filled('teacher_id')) {
-            $query->where('teacher_id', $request->teacher_id);
-        }
-
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->filled('from_date') && $request->filled('to_date')) {
-            $query->whereBetween('exception_date', [
-                $request->from_date,
-                $request->to_date,
-            ]);
-        }
+        $query = TeacherAvailabilityException::query()
+            ->with(['teacher', 'bell', 'academicYear'])
+            ->where('subscription_id', $subscriptionId)
+            ->when(
+                isset($validated['teacher_id']),
+                fn ($query) => $query->where('teacher_id', (int) $validated['teacher_id'])
+            )
+            ->when(
+                isset($validated['status']),
+                fn ($query) => $query->where('status', $validated['status'])
+            )
+            ->when(
+                isset($validated['from_date']),
+                fn ($query) => $query->whereDate('exception_date', '>=', $validated['from_date'])
+            )
+            ->when(
+                isset($validated['to_date']),
+                fn ($query) => $query->whereDate('exception_date', '<=', $validated['to_date'])
+            )
+            ->ordered();
 
         return response()->json([
             'success' => true,
-            'data' => $query->latest()->paginate($request->get('per_page', 20)),
+            'data' => $query->paginate((int) ($validated['per_page'] ?? 20)),
         ]);
     }
 
-    public function dashboard(Request $request)
+    public function dashboard(Request $request): JsonResponse
     {
-        $subscriptionId = $this->subscriptionId();
+        $subscriptionId = $this->subscriptionId($request);
 
-        $today = $request->get('date', now()->toDateString());
+        $validated = $request->validate([
+            'date' => ['nullable', 'date'],
+        ]);
+
+        $today = $validated['date'] ?? now()->toDateString();
         $weekStart = Carbon::parse($today)->startOfWeek()->toDateString();
         $weekEnd = Carbon::parse($today)->endOfWeek()->toDateString();
 
@@ -56,15 +71,25 @@ class TeacherAvailabilityExceptionController extends Controller
             ->orderBy('name')
             ->get(['id', 'name', 'email']);
 
-        $bells = SchoolBell::where('is_active', true)
-            ->where('is_teaching_period', true)
-            ->orderBy('sort_order')
-            ->get(['id', 'title', 'period_number', 'start_time', 'end_time']);
+        $bells = SchoolBell::query()
+            ->active()
+            ->teachingPeriods()
+            ->ordered()
+            ->get([
+                'id',
+                'title',
+                'period_number',
+                'start_time',
+                'end_time',
+                'sort_order',
+            ]);
 
-        $exceptions = TeacherAvailabilityException::with(['teacher', 'bell'])
+        $exceptions = TeacherAvailabilityException::query()
+            ->with(['teacher', 'bell'])
             ->where('subscription_id', $subscriptionId)
-            ->where('is_active', true)
+            ->active()
             ->whereBetween('exception_date', [$weekStart, $weekEnd])
+            ->ordered()
             ->get();
 
         return response()->json([
@@ -75,16 +100,18 @@ class TeacherAvailabilityExceptionController extends Controller
                 'exceptions' => $exceptions,
                 'stats' => [
                     'total_teachers' => $teachers->count(),
-                    'today_exceptions' => $exceptions->where('exception_date', $today)->count(),
+                    'today_exceptions' => $exceptions
+                        ->filter(fn ($exception) => $exception->exception_date?->toDateString() === $today)
+                        ->count(),
                     'teachers_on_leave' => $exceptions
-                        ->where('exception_date', $today)
-                        ->where('status', 'leave')
+                        ->filter(fn ($exception) => $exception->exception_date?->toDateString() === $today)
+                        ->where('status', TeacherAvailabilityException::STATUS_LEAVE)
                         ->pluck('teacher_id')
                         ->unique()
                         ->count(),
                     'busy_periods' => $exceptions
-                        ->where('exception_date', $today)
-                        ->whereIn('status', ['busy', 'meeting', 'training', 'exam_duty', 'assembly', 'blocked'])
+                        ->filter(fn ($exception) => $exception->exception_date?->toDateString() === $today)
+                        ->whereIn('status', TeacherAvailabilityException::blockingStatuses())
                         ->count(),
                 ],
                 'week' => [
@@ -95,14 +122,16 @@ class TeacherAvailabilityExceptionController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(Request $request): JsonResponse
     {
-        $data = $this->validatedData($request);
+        $subscriptionId = $this->subscriptionId($request);
+        $data = $this->validatedData($request, $subscriptionId);
 
-        $data['subscription_id'] = $this->subscriptionId();
-        $data['created_by'] = auth()->id();
+        $data['subscription_id'] = $subscriptionId;
+        $data['created_by'] = (int) $request->user()->id;
+        $data['weekday'] = Carbon::parse($data['exception_date'])->isoWeekday();
 
-        if (($data['is_full_day'] ?? false) === true) {
+        if ((bool) ($data['is_full_day'] ?? false)) {
             $data['school_bell_id'] = null;
         }
 
@@ -112,16 +141,20 @@ class TeacherAvailabilityExceptionController extends Controller
             'success' => true,
             'message' => 'Teacher availability exception created successfully.',
             'data' => $exception->fresh(['teacher', 'bell', 'academicYear']),
-        ]);
+        ], 201);
     }
 
-    public function update(Request $request, TeacherAvailabilityException $teacherAvailabilityException)
-    {
-        $this->ensureAccess($teacherAvailabilityException);
+    public function update(
+        Request $request,
+        TeacherAvailabilityException $teacherAvailabilityException
+    ): JsonResponse {
+        $this->ensureAccess($request, $teacherAvailabilityException);
 
-        $data = $this->validatedData($request);
+        $subscriptionId = $this->subscriptionId($request);
+        $data = $this->validatedData($request, $subscriptionId);
+        $data['weekday'] = Carbon::parse($data['exception_date'])->isoWeekday();
 
-        if (($data['is_full_day'] ?? false) === true) {
+        if ((bool) ($data['is_full_day'] ?? false)) {
             $data['school_bell_id'] = null;
         }
 
@@ -134,9 +167,11 @@ class TeacherAvailabilityExceptionController extends Controller
         ]);
     }
 
-    public function destroy(TeacherAvailabilityException $teacherAvailabilityException)
-    {
-        $this->ensureAccess($teacherAvailabilityException);
+    public function destroy(
+        Request $request,
+        TeacherAvailabilityException $teacherAvailabilityException
+    ): JsonResponse {
+        $this->ensureAccess($request, $teacherAvailabilityException);
 
         $teacherAvailabilityException->delete();
 
@@ -150,14 +185,25 @@ class TeacherAvailabilityExceptionController extends Controller
         Request $request,
         TeacherAvailabilityException $teacherAvailabilityException,
         MoveTeacherAvailabilityExceptionService $service
-    ) {
-        $this->ensureAccess($teacherAvailabilityException);
+    ): JsonResponse {
+        $this->ensureAccess($request, $teacherAvailabilityException);
 
         $data = $request->validate([
-            'exception_date' => 'required|date',
-            'weekday' => 'required|string|max:20',
-            'school_bell_id' => 'required|exists:school_bells,id',
+            'exception_date' => ['required', 'date'],
+            'school_bell_id' => [
+                'required',
+                'integer',
+                Rule::exists('school_bells', 'id')->where(
+                    fn ($query) => $query
+                        ->where('is_active', true)
+                        ->where('is_teaching_period', true)
+                        ->where('is_break', false)
+                        ->where('is_dispersal', false)
+                ),
+            ],
         ]);
+
+        $data['weekday'] = Carbon::parse($data['exception_date'])->isoWeekday();
 
         $exception = $service->move(
             $teacherAvailabilityException,
@@ -171,34 +217,65 @@ class TeacherAvailabilityExceptionController extends Controller
         ]);
     }
 
-    private function validatedData(Request $request): array
+    private function validatedData(Request $request, int $subscriptionId): array
     {
         return $request->validate([
-            'academic_year_id' => 'nullable|exists:academic_years,id',
-            'teacher_id' => 'required|exists:users,id',
-            'exception_date' => 'required|date',
-            'weekday' => 'required|string|max:20',
-            'school_bell_id' => 'nullable|exists:school_bells,id',
-            'status' => 'required|in:busy,leave,meeting,training,exam_duty,assembly,blocked,extra_class',
-            'reason' => 'nullable|string|max:255',
-            'remarks' => 'nullable|string',
-            'is_full_day' => 'boolean',
-            'is_recurring' => 'boolean',
-            'recurrence_type' => 'nullable|in:weekly,monthly',
-            'valid_from' => 'nullable|date',
-            'valid_to' => 'nullable|date|after_or_equal:valid_from',
-            'is_active' => 'boolean',
+            'academic_year_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('academic_years', 'id')->where(
+                    fn ($query) => $query
+                        ->where('subscription_id', $subscriptionId)
+                        ->where('is_active', true)
+                ),
+            ],
+            'teacher_id' => $this->teacherRules($subscriptionId),
+            'exception_date' => ['required', 'date'],
+            'weekday' => ['nullable', 'integer', 'between:1,7'],
+            'is_full_day' => ['sometimes', 'boolean'],
+            'school_bell_id' => [
+                'nullable',
+                'required_unless:is_full_day,true',
+                'integer',
+                Rule::exists('school_bells', 'id')->where(
+                    fn ($query) => $query
+                        ->where('is_active', true)
+                        ->where('is_teaching_period', true)
+                        ->where('is_break', false)
+                        ->where('is_dispersal', false)
+                ),
+            ],
+            'status' => ['required', Rule::in(TeacherAvailabilityException::statuses())],
+            'reason' => ['nullable', 'string', 'max:255'],
+            'remarks' => ['nullable', 'string'],
+            'is_recurring' => ['sometimes', 'boolean'],
+            'recurrence_type' => ['nullable', Rule::in(['weekly', 'monthly'])],
+            'valid_from' => ['nullable', 'date'],
+            'valid_to' => ['nullable', 'date', 'after_or_equal:valid_from'],
+            'is_active' => ['sometimes', 'boolean'],
         ]);
     }
 
-    
-    private function subscriptionId(): int
+    private function teacherRules(int $subscriptionId): array
     {
-        $subscriptionId = auth()->user()?->subscription_id
-            ?? auth()->user()?->subscription?->id;
+        return [
+            'required',
+            'integer',
+            Rule::exists('users', 'id')->where(
+                fn ($query) => $query
+                    ->where('subscription_id', $subscriptionId)
+                    ->where('is_active', true)
+            ),
+        ];
+    }
+
+    private function subscriptionId(Request $request): int
+    {
+        $subscriptionId = $request->user()?->subscription_id
+            ?? $request->user()?->subscription?->id;
 
         abort_if(
-            ! $subscriptionId,
+            !$subscriptionId,
             403,
             'No subscription assigned to your account.'
         );
@@ -206,10 +283,12 @@ class TeacherAvailabilityExceptionController extends Controller
         return (int) $subscriptionId;
     }
 
-    private function ensureAccess(TeacherAvailabilityException $exception): void
-    {
+    private function ensureAccess(
+        Request $request,
+        TeacherAvailabilityException $exception
+    ): void {
         abort_if(
-            (int) $exception->subscription_id !== $this->subscriptionId(),
+            (int) $exception->subscription_id !== $this->subscriptionId($request),
             403,
             'You are not allowed to access this exception.'
         );
