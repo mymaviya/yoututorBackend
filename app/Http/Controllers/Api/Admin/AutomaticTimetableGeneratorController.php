@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Services\AcademicPlanning\AutomaticTimetableGeneratorService;
+use App\Services\AcademicPlanning\AdvancedTimetableGeneratorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -11,7 +11,7 @@ use Illuminate\Validation\Rule;
 class AutomaticTimetableGeneratorController extends Controller
 {
     public function __construct(
-        protected AutomaticTimetableGeneratorService $service
+        protected AdvancedTimetableGeneratorService $service
     ) {}
 
     public function constraints(): JsonResponse
@@ -81,6 +81,13 @@ class AutomaticTimetableGeneratorController extends Controller
                         'weekday' => 'integer:1-7',
                         'school_bell_id' => 'integer',
                     ],
+                ],
+                [
+                    'rule_key' => 'room.required_for_labs',
+                    'value_type' => 'boolean',
+                    'default' => true,
+                    'constraint_type' => 'hard_or_soft',
+                    'description' => 'Require compatible laboratory rooms for lab-category subjects.',
                 ],
             ],
         ]);
