@@ -2,163 +2,103 @@
 
 namespace App\Http\Controllers\Api\Admin;
 
-use App\Http\Controllers\Controller;
-use App\Models\SubjectPeriodAllocation;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use App\Exports\SubjectPeriodAllocationExport;
 use App\Exports\SubjectPeriodAllocationTemplateExport;
+use App\Http\Controllers\Controller;
 use App\Imports\SubjectPeriodAllocationImport;
+use App\Models\Subject;
+use App\Models\SubjectPeriodAllocation;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Maatwebsite\Excel\Facades\Excel;
 
 class SubjectPeriodAllocationController extends Controller
 {
+    private const CATEGORIES = ['major', 'minor', 'language', 'elective', 'lab', 'activity'];
+
     public function index(Request $request)
     {
-        $query = SubjectPeriodAllocation::with([
-            'grade',
-            'section',
-            'stream',
-            'subject',
-            'preferredTeacher',
-        ]);
+        $subscriptionId = $this->subscriptionId();
 
-        if ($request->filled('grade_id')) {
-            $query->where('grade_id', $request->grade_id);
-        }
+        $query = SubjectPeriodAllocation::query()
+            ->where('subscription_id', $subscriptionId)
+            ->with(['grade', 'section', 'stream', 'subject', 'preferredTeacher']);
 
-        if ($request->filled('section_id')) {
-            $query->where('section_id', $request->section_id);
-        }
-
-        if ($request->filled('stream_id')) {
-            $query->where('stream_id', $request->stream_id);
-        }
-
-        if ($request->filled('subject_category')) {
-            $query->where('subject_category', $request->subject_category);
+        foreach (['academic_year_id', 'grade_id', 'section_id', 'stream_id', 'subject_category'] as $filter) {
+            if ($request->filled($filter)) {
+                $query->where($filter, $request->input($filter));
+            }
         }
 
         return response()->json([
             'success' => true,
-            'data' => $query
-                ->latest()
-                ->paginate($request->get('per_page', 20)),
+            'data' => $query->latest()->paginate($request->integer('per_page', 20)),
         ]);
     }
 
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'academic_year_id' => 'nullable|exists:academic_years,id',
-            'grade_id' => 'required|exists:grades,id',
-            'section_id' => 'nullable|exists:sections,id',
-            'stream_id' => 'nullable|exists:streams,id',
-            'subject_id' => 'required|exists:subjects,id',
-            'preferred_teacher_id' => 'nullable|exists:users,id',
-
-            'subject_category' => 'required|in:major,minor,language,elective,lab,activity',
-            'weekly_periods' => 'required|integer|min:1|max:60',
-            'max_periods_per_day' => 'required|integer|min:1|max:10',
-
-            'prefer_double_period' => 'boolean',
-            'prefer_morning' => 'boolean',
-            'prefer_last_period' => 'boolean',
-            'prefer_saturday' => 'boolean',
-
-            'is_optional' => 'boolean',
-            'is_parallel_subject' => 'boolean',
-            'parallel_group_code' => 'nullable|string|max:100',
-
-            'priority' => 'nullable|integer|min:1|max:10',
-            'is_active' => 'boolean',
-        ]);
-
-        $data['subscription_id'] = auth()->user()->subscription_id;
+        $subscriptionId = $this->subscriptionId();
+        $data = $this->validateAllocation($request, $subscriptionId);
+        $data['subscription_id'] = $subscriptionId;
 
         $allocation = SubjectPeriodAllocation::updateOrCreate(
-            [
-                'subscription_id' => $data['subscription_id'],
-                'academic_year_id' => $data['academic_year_id'] ?? null,
-                'grade_id' => $data['grade_id'],
-                'section_id' => $data['section_id'] ?? null,
-                'stream_id' => $data['stream_id'] ?? null,
-                'subject_id' => $data['subject_id'],
-            ],
+            $this->identityAttributes($data, $subscriptionId),
             $data
         );
 
         return response()->json([
             'success' => true,
             'message' => 'Subject period allocation saved successfully.',
-            'data' => $allocation->load([
-                'grade',
-                'section',
-                'stream',
-                'subject',
-                'preferredTeacher',
-            ]),
+            'data' => $allocation->load(['grade', 'section', 'stream', 'subject', 'preferredTeacher']),
         ]);
     }
 
     public function show(SubjectPeriodAllocation $subjectPeriodAllocation)
     {
+        $this->ensureOwned($subjectPeriodAllocation);
+
         return response()->json([
             'success' => true,
-            'data' => $subjectPeriodAllocation->load([
-                'grade',
-                'section',
-                'stream',
-                'subject',
-                'preferredTeacher',
-            ]),
+            'data' => $subjectPeriodAllocation->load(['grade', 'section', 'stream', 'subject', 'preferredTeacher']),
         ]);
     }
 
     public function update(Request $request, SubjectPeriodAllocation $subjectPeriodAllocation)
     {
-        $data = $request->validate([
-            'academic_year_id' => 'nullable|exists:academic_years,id',
-            'grade_id' => 'required|exists:grades,id',
-            'section_id' => 'nullable|exists:sections,id',
-            'stream_id' => 'nullable|exists:streams,id',
-            'subject_id' => 'required|exists:subjects,id',
-            'preferred_teacher_id' => 'nullable|exists:users,id',
+        $this->ensureOwned($subjectPeriodAllocation);
 
-            'subject_category' => 'required|in:major,minor,language,elective,lab,activity',
-            'weekly_periods' => 'required|integer|min:1|max:60',
-            'max_periods_per_day' => 'required|integer|min:1|max:10',
+        $subscriptionId = $this->subscriptionId();
+        $data = $this->validateAllocation($request, $subscriptionId);
 
-            'prefer_double_period' => 'boolean',
-            'prefer_morning' => 'boolean',
-            'prefer_last_period' => 'boolean',
-            'prefer_saturday' => 'boolean',
+        $duplicate = SubjectPeriodAllocation::query()
+            ->where($this->identityAttributes($data, $subscriptionId))
+            ->whereKeyNot($subjectPeriodAllocation->getKey())
+            ->exists();
 
-            'is_optional' => 'boolean',
-            'is_parallel_subject' => 'boolean',
-            'parallel_group_code' => 'nullable|string|max:100',
-
-            'priority' => 'nullable|integer|min:1|max:10',
-            'is_active' => 'boolean',
-        ]);
+        if ($duplicate) {
+            return response()->json([
+                'success' => false,
+                'message' => 'An allocation already exists for this subject and selected class combination.',
+            ], 422);
+        }
 
         $subjectPeriodAllocation->update($data);
 
         return response()->json([
             'success' => true,
             'message' => 'Subject period allocation updated successfully.',
-            'data' => $subjectPeriodAllocation->fresh([
-                'grade',
-                'section',
-                'stream',
-                'subject',
-                'preferredTeacher',
-            ]),
+            'data' => $subjectPeriodAllocation->fresh(['grade', 'section', 'stream', 'subject', 'preferredTeacher']),
         ]);
     }
 
     public function destroy(SubjectPeriodAllocation $subjectPeriodAllocation)
     {
+        $this->ensureOwned($subjectPeriodAllocation);
         $subjectPeriodAllocation->delete();
 
         return response()->json([
@@ -169,34 +109,28 @@ class SubjectPeriodAllocationController extends Controller
 
     public function bulkSave(Request $request)
     {
-        $data = $request->validate([
-            'academic_year_id' => 'nullable|exists:academic_years,id',
-            'grade_id' => 'required|exists:grades,id',
-            'section_id' => 'nullable|exists:sections,id',
-            'stream_id' => 'nullable|exists:streams,id',
-            'items' => 'required|array|min:1',
-
-            'items.*.subject_id' => 'required|exists:subjects,id',
-            'items.*.preferred_teacher_id' => 'nullable|exists:users,id',
-            'items.*.subject_category' => 'required|in:major,minor,language,elective,lab,activity',
-            'items.*.weekly_periods' => 'required|integer|min:1|max:60',
-            'items.*.max_periods_per_day' => 'required|integer|min:1|max:10',
-
-            'items.*.prefer_double_period' => 'boolean',
-            'items.*.prefer_morning' => 'boolean',
-            'items.*.prefer_last_period' => 'boolean',
-            'items.*.prefer_saturday' => 'boolean',
-            'items.*.is_optional' => 'boolean',
-            'items.*.is_parallel_subject' => 'boolean',
-            'items.*.parallel_group_code' => 'nullable|string|max:100',
-            'items.*.priority' => 'nullable|integer|min:1|max:10',
-            'items.*.is_active' => 'boolean',
-        ]);
-
-        $subscriptionId = auth()->user()->subscription_id;
+        $subscriptionId = $this->subscriptionId();
+        $data = $this->validateBulk($request, $subscriptionId);
 
         DB::transaction(function () use ($data, $subscriptionId) {
+            $scope = $this->scopeQuery(
+                SubjectPeriodAllocation::query(),
+                $subscriptionId,
+                $data['academic_year_id'] ?? null,
+                (int) $data['grade_id'],
+                $data['section_id'] ?? null,
+                $data['stream_id'] ?? null
+            );
+
+            $submittedSubjectIds = collect($data['items'])
+                ->pluck('subject_id')
+                ->map(fn ($id) => (int) $id);
+
+            $scope->whereNotIn('subject_id', $submittedSubjectIds)->delete();
+
             foreach ($data['items'] as $item) {
+                $item = $this->normaliseItem($item);
+
                 SubjectPeriodAllocation::updateOrCreate(
                     [
                         'subscription_id' => $subscriptionId,
@@ -220,38 +154,36 @@ class SubjectPeriodAllocationController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Subject period allocations saved successfully.',
+            'saved_count' => count($data['items']),
         ]);
     }
 
     public function bulkEditorData(Request $request)
     {
-        $data = $request->validate([
-            'grade_id' => 'required|exists:grades,id',
-            'academic_year_id' => 'nullable|exists:academic_years,id',
-            'section_id' => 'nullable|exists:sections,id',
-            'stream_id' => 'nullable|exists:streams,id',
-        ]);
+        $subscriptionId = $this->subscriptionId();
+        $data = $request->validate($this->scopeRules($subscriptionId));
 
-        $subscriptionId = auth()->user()->subscription_id;
-
-        $subjects = \App\Models\Subject::query()
+        $subjects = Subject::query()
             ->where('subscription_id', $subscriptionId)
             ->where('grade_id', $data['grade_id'])
-            ->when($data['stream_id'] ?? null, fn($q) => $q->where('stream_id', $data['stream_id']))
+            ->when(
+                $data['stream_id'] ?? null,
+                fn (Builder $query, $streamId) => $query->where('stream_id', $streamId)
+            )
             ->where('is_active', true)
             ->orderBy('name')
             ->get();
 
-        $allocations = SubjectPeriodAllocation::query()
-            ->where('subscription_id', $subscriptionId)
-            ->where('grade_id', $data['grade_id'])
-            ->where('academic_year_id', $data['academic_year_id'] ?? null)
-            ->where('section_id', $data['section_id'] ?? null)
-            ->where('stream_id', $data['stream_id'] ?? null)
-            ->get()
-            ->keyBy('subject_id');
+        $allocations = $this->scopeQuery(
+            SubjectPeriodAllocation::query(),
+            $subscriptionId,
+            $data['academic_year_id'] ?? null,
+            (int) $data['grade_id'],
+            $data['section_id'] ?? null,
+            $data['stream_id'] ?? null
+        )->get()->keyBy('subject_id');
 
-        $rows = $subjects->map(function ($subject) use ($allocations) {
+        $rows = $subjects->map(function (Subject $subject) use ($allocations) {
             $existing = $allocations->get($subject->id);
 
             return [
@@ -274,65 +206,81 @@ class SubjectPeriodAllocationController extends Controller
             ];
         });
 
-        return response()->json([
-            'success' => true,
-            'data' => $rows,
-        ]);
+        return response()->json(['success' => true, 'data' => $rows]);
     }
 
     public function copyGrade(Request $request)
     {
+        $subscriptionId = $this->subscriptionId();
+
         $data = $request->validate([
-            'from_academic_year_id' => 'nullable|exists:academic_years,id',
-            'to_academic_year_id' => 'nullable|exists:academic_years,id',
-
-            'from_grade_id' => 'required|exists:grades,id',
-            'to_grade_id' => 'required|exists:grades,id',
-
-            'from_section_id' => 'nullable|exists:sections,id',
-            'to_section_id' => 'nullable|exists:sections,id',
-
-            'from_stream_id' => 'nullable|exists:streams,id',
-            'to_stream_id' => 'nullable|exists:streams,id',
+            'from_academic_year_id' => ['nullable', $this->ownedExists('academic_years', $subscriptionId)],
+            'to_academic_year_id' => ['nullable', $this->ownedExists('academic_years', $subscriptionId)],
+            'from_grade_id' => ['required', $this->ownedExists('grades', $subscriptionId)],
+            'to_grade_id' => ['required', $this->ownedExists('grades', $subscriptionId)],
+            'from_section_id' => ['nullable', $this->ownedExists('sections', $subscriptionId)],
+            'to_section_id' => ['nullable', $this->ownedExists('sections', $subscriptionId)],
+            'from_stream_id' => ['nullable', $this->ownedExists('streams', $subscriptionId)],
+            'to_stream_id' => ['nullable', $this->ownedExists('streams', $subscriptionId)],
         ]);
 
-        $subscriptionId = auth()->user()->subscription_id;
+        $sameScope = ($data['from_academic_year_id'] ?? null) == ($data['to_academic_year_id'] ?? null)
+            && (int) $data['from_grade_id'] === (int) $data['to_grade_id']
+            && ($data['from_section_id'] ?? null) == ($data['to_section_id'] ?? null)
+            && ($data['from_stream_id'] ?? null) == ($data['to_stream_id'] ?? null);
 
-        $sourceAllocations = SubjectPeriodAllocation::query()
-            ->where('subscription_id', $subscriptionId)
-            ->where('academic_year_id', $data['from_academic_year_id'] ?? null)
-            ->where('grade_id', $data['from_grade_id'])
-            ->where('section_id', $data['from_section_id'] ?? null)
-            ->where('stream_id', $data['from_stream_id'] ?? null)
-            ->get();
-
-        foreach ($sourceAllocations as $allocation) {
-            SubjectPeriodAllocation::updateOrCreate(
-                [
-                    'subscription_id' => $subscriptionId,
-                    'academic_year_id' => $data['to_academic_year_id'] ?? null,
-                    'grade_id' => $data['to_grade_id'],
-                    'section_id' => $data['to_section_id'] ?? null,
-                    'stream_id' => $data['to_stream_id'] ?? null,
-                    'subject_id' => $allocation->subject_id,
-                ],
-                [
-                    'preferred_teacher_id' => $allocation->preferred_teacher_id,
-                    'subject_category' => $allocation->subject_category,
-                    'weekly_periods' => $allocation->weekly_periods,
-                    'max_periods_per_day' => $allocation->max_periods_per_day,
-                    'prefer_double_period' => $allocation->prefer_double_period,
-                    'prefer_morning' => $allocation->prefer_morning,
-                    'prefer_last_period' => $allocation->prefer_last_period,
-                    'prefer_saturday' => $allocation->prefer_saturday,
-                    'is_optional' => $allocation->is_optional,
-                    'is_parallel_subject' => $allocation->is_parallel_subject,
-                    'parallel_group_code' => $allocation->parallel_group_code,
-                    'priority' => $allocation->priority,
-                    'is_active' => $allocation->is_active,
-                ]
-            );
+        if ($sameScope) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Source and destination allocation cannot be the same.',
+            ], 422);
         }
+
+        $sourceAllocations = $this->scopeQuery(
+            SubjectPeriodAllocation::query(),
+            $subscriptionId,
+            $data['from_academic_year_id'] ?? null,
+            (int) $data['from_grade_id'],
+            $data['from_section_id'] ?? null,
+            $data['from_stream_id'] ?? null
+        )->get();
+
+        if ($sourceAllocations->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No source allocations were found to copy.',
+            ], 422);
+        }
+
+        DB::transaction(function () use ($sourceAllocations, $data, $subscriptionId) {
+            foreach ($sourceAllocations as $allocation) {
+                SubjectPeriodAllocation::updateOrCreate(
+                    [
+                        'subscription_id' => $subscriptionId,
+                        'academic_year_id' => $data['to_academic_year_id'] ?? null,
+                        'grade_id' => $data['to_grade_id'],
+                        'section_id' => $data['to_section_id'] ?? null,
+                        'stream_id' => $data['to_stream_id'] ?? null,
+                        'subject_id' => $allocation->subject_id,
+                    ],
+                    Arr::only($allocation->toArray(), [
+                        'preferred_teacher_id',
+                        'subject_category',
+                        'weekly_periods',
+                        'max_periods_per_day',
+                        'prefer_double_period',
+                        'prefer_morning',
+                        'prefer_last_period',
+                        'prefer_saturday',
+                        'is_optional',
+                        'is_parallel_subject',
+                        'parallel_group_code',
+                        'priority',
+                        'is_active',
+                    ])
+                );
+            }
+        });
 
         return response()->json([
             'success' => true,
@@ -342,25 +290,21 @@ class SubjectPeriodAllocationController extends Controller
     }
 
     public function template()
-{
-    return Excel::download(
-        new SubjectPeriodAllocationTemplateExport(),
-        'subject-period-allocation-template.xlsx'
-    );
-}
+    {
+        return Excel::download(
+            new SubjectPeriodAllocationTemplateExport(),
+            'subject-period-allocation-template.xlsx'
+        );
+    }
 
     public function export(Request $request)
     {
-        $data = $request->validate([
-            'grade_id' => 'required|exists:grades,id',
-            'academic_year_id' => 'nullable|exists:academic_years,id',
-            'section_id' => 'nullable|exists:sections,id',
-            'stream_id' => 'nullable|exists:streams,id',
-        ]);
+        $subscriptionId = $this->subscriptionId();
+        $data = $request->validate($this->scopeRules($subscriptionId));
 
         return Excel::download(
             new SubjectPeriodAllocationExport(
-                auth()->user()->subscription_id,
+                $subscriptionId,
                 (int) $data['grade_id'],
                 $data['academic_year_id'] ?? null,
                 $data['section_id'] ?? null,
@@ -372,17 +316,14 @@ class SubjectPeriodAllocationController extends Controller
 
     public function import(Request $request)
     {
-        $data = $request->validate([
-            'academic_year_id' => 'nullable|exists:academic_years,id',
-            'grade_id' => 'required|exists:grades,id',
-            'section_id' => 'nullable|exists:sections,id',
-            'stream_id' => 'nullable|exists:streams,id',
-            'file' => 'required|file|mimes:xlsx,xls,csv',
-        ]);
+        $subscriptionId = $this->subscriptionId();
+        $data = $request->validate(array_merge($this->scopeRules($subscriptionId), [
+            'file' => 'required|file|mimes:xlsx,xls,csv|max:10240',
+        ]));
 
         Excel::import(
             new SubjectPeriodAllocationImport(
-                auth()->user()->subscription_id,
+                $subscriptionId,
                 (int) $data['grade_id'],
                 $data['academic_year_id'] ?? null,
                 $data['section_id'] ?? null,
@@ -395,5 +336,159 @@ class SubjectPeriodAllocationController extends Controller
             'success' => true,
             'message' => 'Subject period allocations imported successfully.',
         ]);
+    }
+
+    private function validateAllocation(Request $request, int $subscriptionId): array
+    {
+        $validator = Validator::make(
+            $request->all(),
+            array_merge($this->scopeRules($subscriptionId), $this->itemRules($subscriptionId))
+        );
+
+        $this->addLogicalValidation($validator, fn () => [$request->all()]);
+
+        return $validator->validate();
+    }
+
+    private function validateBulk(Request $request, int $subscriptionId): array
+    {
+        $rules = $this->scopeRules($subscriptionId);
+        $rules['items'] = ['required', 'array', 'min:1'];
+
+        foreach ($this->itemRules($subscriptionId) as $key => $rule) {
+            $rules['items.*.' . $key] = $rule;
+        }
+
+        $rules['items.*.subject_id'][] = 'distinct';
+
+        $validator = Validator::make($request->all(), $rules);
+        $this->addLogicalValidation($validator, fn () => $request->input('items', []));
+
+        return $validator->validate();
+    }
+
+    private function addLogicalValidation($validator, callable $itemsResolver): void
+    {
+        $validator->after(function ($validator) use ($itemsResolver) {
+            foreach ($itemsResolver() as $index => $item) {
+                $label = isset($item['subject_name'])
+                    ? $item['subject_name']
+                    : 'Subject row ' . ($index + 1);
+
+                $weekly = (int) ($item['weekly_periods'] ?? 0);
+                $daily = (int) ($item['max_periods_per_day'] ?? 0);
+
+                if ($daily > 0 && $weekly > ($daily * 6)) {
+                    $validator->errors()->add(
+                        "items.$index.weekly_periods",
+                        "$label exceeds the six-day capacity allowed by Max/Day."
+                    );
+                }
+
+                if (!empty($item['prefer_double_period']) && $weekly < 2) {
+                    $validator->errors()->add(
+                        "items.$index.prefer_double_period",
+                        "$label needs at least two weekly periods for double-period preference."
+                    );
+                }
+
+                if (!empty($item['is_parallel_subject']) && blank($item['parallel_group_code'] ?? null)) {
+                    $validator->errors()->add(
+                        "items.$index.parallel_group_code",
+                        "$label requires a parallel group code."
+                    );
+                }
+            }
+        });
+    }
+
+    private function scopeRules(int $subscriptionId): array
+    {
+        return [
+            'academic_year_id' => ['nullable', $this->ownedExists('academic_years', $subscriptionId)],
+            'grade_id' => ['required', $this->ownedExists('grades', $subscriptionId)],
+            'section_id' => ['nullable', $this->ownedExists('sections', $subscriptionId)],
+            'stream_id' => ['nullable', $this->ownedExists('streams', $subscriptionId)],
+        ];
+    }
+
+    private function itemRules(int $subscriptionId): array
+    {
+        return [
+            'subject_id' => ['required', $this->ownedExists('subjects', $subscriptionId)],
+            'preferred_teacher_id' => ['nullable', $this->ownedExists('users', $subscriptionId)],
+            'subject_category' => ['required', Rule::in(self::CATEGORIES)],
+            'weekly_periods' => ['required', 'integer', 'min:0', 'max:60'],
+            'max_periods_per_day' => ['required', 'integer', 'min:1', 'max:10'],
+            'prefer_double_period' => ['sometimes', 'boolean'],
+            'prefer_morning' => ['sometimes', 'boolean'],
+            'prefer_last_period' => ['sometimes', 'boolean'],
+            'prefer_saturday' => ['sometimes', 'boolean'],
+            'is_optional' => ['sometimes', 'boolean'],
+            'is_parallel_subject' => ['sometimes', 'boolean'],
+            'parallel_group_code' => ['nullable', 'string', 'max:100'],
+            'priority' => ['nullable', 'integer', 'min:1', 'max:10'],
+            'is_active' => ['sometimes', 'boolean'],
+        ];
+    }
+
+    private function identityAttributes(array $data, int $subscriptionId): array
+    {
+        return [
+            'subscription_id' => $subscriptionId,
+            'academic_year_id' => $data['academic_year_id'] ?? null,
+            'grade_id' => $data['grade_id'],
+            'section_id' => $data['section_id'] ?? null,
+            'stream_id' => $data['stream_id'] ?? null,
+            'subject_id' => $data['subject_id'],
+        ];
+    }
+
+    private function normaliseItem(array $item): array
+    {
+        $item['parallel_group_code'] = !empty($item['is_parallel_subject'])
+            ? trim((string) ($item['parallel_group_code'] ?? ''))
+            : null;
+
+        $item['priority'] = $item['priority'] ?? 5;
+        $item['is_active'] = $item['is_active'] ?? true;
+
+        return $item;
+    }
+
+    private function scopeQuery(
+        Builder $query,
+        int $subscriptionId,
+        ?int $academicYearId,
+        int $gradeId,
+        ?int $sectionId,
+        ?int $streamId
+    ): Builder {
+        return $query
+            ->where('subscription_id', $subscriptionId)
+            ->where('academic_year_id', $academicYearId)
+            ->where('grade_id', $gradeId)
+            ->where('section_id', $sectionId)
+            ->where('stream_id', $streamId);
+    }
+
+    private function ownedExists(string $table, int $subscriptionId)
+    {
+        return Rule::exists($table, 'id')->where(
+            fn ($query) => $query->where('subscription_id', $subscriptionId)
+        );
+    }
+
+    private function ensureOwned(SubjectPeriodAllocation $allocation): void
+    {
+        abort_unless(
+            (int) $allocation->subscription_id === $this->subscriptionId(),
+            404
+        );
+    }
+
+    private function subscriptionId(): int
+    {
+        return (int) auth()->user()->subscription_id;
     }
 }

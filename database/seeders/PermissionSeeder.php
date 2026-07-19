@@ -255,6 +255,12 @@ class PermissionSeeder extends Seeder
                 'group_name' => 'Academic Planning',
             ],
 
+            [
+                'name' => 'View Teacher Timetable',
+                'slug' => 'teacher.timetable',
+                'group_name' => 'Academic Planning',
+            ],
+
         ];
 
 

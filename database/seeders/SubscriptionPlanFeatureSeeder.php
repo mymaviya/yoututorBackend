@@ -51,6 +51,7 @@ class SubscriptionPlanFeatureSeeder extends Seeder
                 'question_bank',
                 'manual_paper_creation',
                 'teacher_management',
+                'academic_planning',
                 'exam_portion',
                 'basic_reports',
                 'import_export',
@@ -68,6 +69,7 @@ class SubscriptionPlanFeatureSeeder extends Seeder
                 'manual_paper_creation',
                 'blueprint_management',
                 'auto_paper_generator',
+                'academic_planning',
                 'teacher_management',
                 'teacher_tasks',
                 'exam_portion',
@@ -93,6 +95,11 @@ class SubscriptionPlanFeatureSeeder extends Seeder
             if (! $plan) {
                 continue;
             }
+
+            // Remove obsolete feature rows that are no longer part of the supported feature catalogue.
+            SubscriptionPlanFeatureItem::where('subscription_plan_id', $plan->id)
+                ->whereNotIn('feature_key', $this->allFeatureKeys)
+                ->delete();
 
             foreach ($this->allFeatureKeys as $featureKey) {
                 SubscriptionPlanFeatureItem::updateOrCreate(

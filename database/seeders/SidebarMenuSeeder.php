@@ -135,7 +135,7 @@ class SidebarMenuSeeder extends Seeder
                 'title' => 'Bell Schedule',
                 'icon' => 'mdi-bell-ring',
                 'route' => '/bell-schedules',
-                'route_name' => 'bell-schedules',
+                'route_name' => 'bell.schedules',
                 'group_name' => 'Academic',
                 'parent_menu' => 'Academic',
                 'permission_slug' => 'bell_schedule_management',
@@ -955,6 +955,71 @@ class SidebarMenuSeeder extends Seeder
                 'show_in_sidebar' => true,
             ],
 
+            [
+                'title' => 'Subject Allocation',
+                'icon' => 'mdi-book-account',
+                'route' => '/academic-planning/subject-allocation',
+                'route_name' => 'subject.allocation',
+                'group_name' => 'Academic Planning',
+                'parent_menu' => 'Academic Planning',
+                'permission_slug' => 'subject.allocation',
+                'feature_key' => 'academic_planning',
+                'role_slug' => null,
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 102,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            [
+                'title' => 'Teacher Availability',
+                'icon' => 'mdi-calendar-account',
+                'route' => '/academic-planning/teacher-availability',
+                'route_name' => 'teacher.availability',
+                'group_name' => 'Academic Planning',
+                'parent_menu' => 'Academic Planning',
+                'permission_slug' => 'teacher.availability',
+                'feature_key' => 'academic_planning',
+                'role_slug' => null,
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 103,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            [
+                'title' => 'Teacher Substitution',
+                'icon' => 'mdi-account-switch',
+                'route' => '/academic-planning/teacher-substitutions',
+                'route_name' => 'teacher.substitution',
+                'group_name' => 'Academic Planning',
+                'parent_menu' => 'Academic Planning',
+                'permission_slug' => 'teacher.substitution',
+                'feature_key' => 'academic_planning',
+                'role_slug' => null,
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 104,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+            [
+                'title' => 'Teacher Timetable',
+                'icon' => 'mdi-calendar-clock-outline',
+                'route' => '/academic-planning/teacher-timetable',
+                'route_name' => 'teacher.timetable',
+                'group_name' => 'Academic Planning',
+                'parent_menu' => 'Academic Planning',
+                'permission_slug' => 'teacher.timetable',
+                'feature_key' => 'academic_planning',
+                'role_slug' => null,
+                'badge' => null,
+                'badge_color' => null,
+                'sort_order' => 105,
+                'is_active' => true,
+                'show_in_sidebar' => true,
+            ],
+
 
 
 
@@ -972,7 +1037,7 @@ class SidebarMenuSeeder extends Seeder
             'subject-templates' => 'academic_setup',
             'subject-templates.apply' => 'academic_setup',
             'lessons.index' => 'academic_setup',
-            'bell-schedules' => 'bell_schedule_management',
+            'bell.schedules' => 'bell_schedule_management',
 
             // Question Bank
             'question.types' => 'question_bank',
@@ -1132,6 +1197,8 @@ class SidebarMenuSeeder extends Seeder
             'timetable.publish' => 'academic_planning',
 
             'teacher.substitution' => 'academic_planning',
+
+            'teacher.timetable' => 'academic_planning',
 
             'academic.planning.reports' => 'academic_planning',
         ];
