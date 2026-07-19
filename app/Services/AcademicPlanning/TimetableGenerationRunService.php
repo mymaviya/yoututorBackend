@@ -2,6 +2,7 @@
 
 namespace App\Services\AcademicPlanning;
 
+use App\Jobs\GenerateTimetableRun;
 use App\Models\TimetableGenerationRun;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
@@ -21,20 +22,18 @@ class TimetableGenerationRunService
         bool $preview,
         ?int $parentRunId = null
     ): array {
-        return $this->execute(
-            subscriptionId: $subscriptionId,
-            userId: $userId,
-            mode: 'single',
-            payload: $payload,
-            preview: $preview,
-            requestedItems: 1,
-            parentRunId: $parentRunId,
-            runner: fn () => $this->singleGenerator->generate(
-                $subscriptionId,
-                $payload,
-                $preview
-            )
+        $run = $this->createRun(
+            $subscriptionId,
+            $userId,
+            'single',
+            $payload,
+            $preview,
+            1,
+            $parentRunId,
+            'running'
         );
+
+        return $this->executeRun($run);
     }
 
     public function executeBatch(
@@ -44,23 +43,126 @@ class TimetableGenerationRunService
         bool $preview,
         ?int $parentRunId = null
     ): array {
-        return $this->execute(
-            subscriptionId: $subscriptionId,
-            userId: $userId,
-            mode: 'batch',
-            payload: $payload,
-            preview: $preview,
-            requestedItems: count($payload['classes'] ?? []),
-            parentRunId: $parentRunId,
-            runner: fn () => $this->batchGenerator->generate(
-                $subscriptionId,
-                $payload,
-                $preview
-            )
+        $run = $this->createRun(
+            $subscriptionId,
+            $userId,
+            'batch',
+            $payload,
+            $preview,
+            count($payload['classes'] ?? []),
+            $parentRunId,
+            'running'
+        );
+
+        return $this->executeRun($run);
+    }
+
+    public function queueSingle(
+        int $subscriptionId,
+        ?int $userId,
+        array $payload,
+        bool $preview,
+        ?int $parentRunId = null
+    ): TimetableGenerationRun {
+        return $this->queue(
+            $subscriptionId,
+            $userId,
+            'single',
+            $payload,
+            $preview,
+            1,
+            $parentRunId
         );
     }
 
-    private function execute(
+    public function queueBatch(
+        int $subscriptionId,
+        ?int $userId,
+        array $payload,
+        bool $preview,
+        ?int $parentRunId = null
+    ): TimetableGenerationRun {
+        return $this->queue(
+            $subscriptionId,
+            $userId,
+            'batch',
+            $payload,
+            $preview,
+            count($payload['classes'] ?? []),
+            $parentRunId
+        );
+    }
+
+    public function executeQueuedRun(int $runId): void
+    {
+        $run = TimetableGenerationRun::query()->findOrFail($runId);
+
+        if ($run->isTerminal()) {
+            return;
+        }
+
+        if ($run->cancellationRequested()) {
+            $this->markCancelled($run);
+            return;
+        }
+
+        $run->forceFill([
+            'status' => 'running',
+            'progress_percentage' => 1,
+            'attempt_count' => (int) $run->attempt_count + 1,
+            'started_at' => $run->started_at ?? now(),
+            'completed_at' => null,
+            'error_message' => null,
+        ])->save();
+
+        $this->executeRun($run, false);
+    }
+
+    public function requestCancellation(TimetableGenerationRun $run): TimetableGenerationRun
+    {
+        if (! $run->canBeCancelled()) {
+            throw ValidationException::withMessages([
+                'generation_run' => 'Only queued or running generation runs can be cancelled.',
+            ]);
+        }
+
+        $run->forceFill([
+            'cancellation_requested_at' => now(),
+        ])->save();
+
+        if ($run->status === 'queued') {
+            $this->markCancelled($run);
+        }
+
+        return $run->fresh()->loadCount('conflicts');
+    }
+
+    private function queue(
+        int $subscriptionId,
+        ?int $userId,
+        string $mode,
+        array $payload,
+        bool $preview,
+        int $requestedItems,
+        ?int $parentRunId
+    ): TimetableGenerationRun {
+        $run = $this->createRun(
+            $subscriptionId,
+            $userId,
+            $mode,
+            $payload,
+            $preview,
+            $requestedItems,
+            $parentRunId,
+            'queued'
+        );
+
+        GenerateTimetableRun::dispatch($run->id);
+
+        return $run->fresh();
+    }
+
+    private function createRun(
         int $subscriptionId,
         ?int $userId,
         string $mode,
@@ -68,65 +170,160 @@ class TimetableGenerationRunService
         bool $preview,
         int $requestedItems,
         ?int $parentRunId,
-        callable $runner
-    ): array {
-        $run = TimetableGenerationRun::query()->create([
+        string $status
+    ): TimetableGenerationRun {
+        return TimetableGenerationRun::query()->create([
             'subscription_id' => $subscriptionId,
             'user_id' => $userId,
             'parent_run_id' => $parentRunId,
             'mode' => $mode,
             'is_preview' => $preview,
-            'status' => 'running',
-            'progress_percentage' => 5,
+            'status' => $status,
+            'progress_percentage' => $status === 'running' ? 5 : 0,
             'requested_items' => max(1, $requestedItems),
-            'started_at' => now(),
+            'attempt_count' => $status === 'running' ? 1 : 0,
+            'started_at' => $status === 'running' ? now() : null,
             'request_payload' => $payload,
         ]);
+    }
 
+    private function executeRun(
+        TimetableGenerationRun $run,
+        bool $returnResult = true
+    ): array {
         try {
-            $result = $runner();
-            $successful = $mode === 'batch'
+            $payload = (array) $run->request_payload;
+
+            if ($run->mode === 'batch') {
+                $result = $this->batchGenerator->generate(
+                    (int) $run->subscription_id,
+                    $payload,
+                    (bool) $run->is_preview,
+                    fn (array $progress) => $this->updateProgress($run, $progress),
+                    fn () => $this->cancellationRequested($run)
+                );
+            } else {
+                if ($this->cancellationRequested($run)) {
+                    $this->markCancelled($run);
+                    return [];
+                }
+
+                $run->forceFill(['progress_percentage' => 15])->save();
+                $result = $this->singleGenerator->generate(
+                    (int) $run->subscription_id,
+                    $payload,
+                    (bool) $run->is_preview
+                );
+            }
+
+            $successful = $run->mode === 'batch'
                 ? (int) ($result['successful_classes'] ?? 0)
                 : ((int) ($result['unscheduled_periods'] ?? 0) === 0 ? 1 : 0);
-            $failed = $mode === 'batch'
+            $failed = $run->mode === 'batch'
                 ? (int) ($result['failed_classes'] ?? 0)
                 : ($successful === 1 ? 0 : 1);
-            $processed = $mode === 'batch'
-                ? $successful + $failed
+            $processed = $run->mode === 'batch'
+                ? (int) ($result['processed_classes'] ?? ($successful + $failed))
                 : 1;
-            $status = $failed > 0
-                ? ($successful > 0 ? 'partial' : 'failed')
-                : 'completed';
 
-            $run->forceFill([
-                'status' => $status,
-                'progress_percentage' => 100,
-                'processed_items' => $processed,
-                'successful_items' => $successful,
-                'failed_items' => $failed,
-                'result_summary' => $this->summary($result),
-                'completed_at' => now(),
-            ])->save();
+            if (($result['cancelled'] ?? false) || $this->cancellationRequested($run)) {
+                $run->forceFill([
+                    'status' => 'cancelled',
+                    'progress_percentage' => min(99, (int) ($run->progress_percentage ?? 0)),
+                    'processed_items' => $processed,
+                    'successful_items' => $successful,
+                    'failed_items' => $failed,
+                    'result_summary' => $this->summary($result),
+                    'cancelled_at' => now(),
+                    'completed_at' => now(),
+                ])->save();
+            } else {
+                $status = $failed > 0
+                    ? ($successful > 0 ? 'partial' : 'failed')
+                    : 'completed';
 
-            $this->storeResultConflicts($run, $result, $mode);
+                $run->forceFill([
+                    'status' => $status,
+                    'progress_percentage' => 100,
+                    'processed_items' => $processed,
+                    'successful_items' => $successful,
+                    'failed_items' => $failed,
+                    'result_summary' => $this->summary($result),
+                    'completed_at' => now(),
+                ])->save();
+            }
 
-            return array_merge($result, [
-                'generation_run_id' => $run->id,
-                'generation_run_status' => $run->status,
-            ]);
+            $this->storeResultConflicts($run, $result, $run->mode);
+
+            return $returnResult
+                ? array_merge($result, [
+                    'generation_run_id' => $run->id,
+                    'generation_run_status' => $run->status,
+                ])
+                : [];
         } catch (Throwable $exception) {
+            $run->refresh();
+
+            if ($run->cancellationRequested()) {
+                $this->markCancelled($run, $exception->getMessage());
+                return [];
+            }
+
             $run->forceFill([
                 'status' => 'failed',
                 'progress_percentage' => 100,
-                'processed_items' => max(1, $requestedItems),
-                'failed_items' => max(1, $requestedItems),
+                'processed_items' => max(1, (int) $run->processed_items),
+                'failed_items' => max(1, (int) $run->requested_items),
                 'error_message' => $exception->getMessage(),
                 'completed_at' => now(),
             ])->save();
 
             $this->storeExceptionConflicts($run, $exception);
-            throw $exception;
+
+            if ($returnResult) {
+                throw $exception;
+            }
+
+            report($exception);
+            return [];
         }
+    }
+
+    private function updateProgress(TimetableGenerationRun $run, array $progress): void
+    {
+        $run->refresh();
+
+        if ($run->isTerminal()) {
+            return;
+        }
+
+        $run->forceFill([
+            'progress_percentage' => max(
+                (int) $run->progress_percentage,
+                min(99, (int) ($progress['progress_percentage'] ?? 0))
+            ),
+            'processed_items' => (int) ($progress['processed_items'] ?? $run->processed_items),
+            'successful_items' => (int) ($progress['successful_items'] ?? $run->successful_items),
+            'failed_items' => (int) ($progress['failed_items'] ?? $run->failed_items),
+        ])->save();
+    }
+
+    private function cancellationRequested(TimetableGenerationRun $run): bool
+    {
+        $run->refresh();
+        return $run->cancellationRequested();
+    }
+
+    private function markCancelled(
+        TimetableGenerationRun $run,
+        ?string $message = null
+    ): void {
+        $run->forceFill([
+            'status' => 'cancelled',
+            'error_message' => $message,
+            'cancelled_at' => now(),
+            'completed_at' => now(),
+        ])->save();
     }
 
     private function summary(array $result): array
@@ -134,7 +331,9 @@ class TimetableGenerationRunService
         return Arr::only($result, [
             'preview',
             'atomic',
+            'cancelled',
             'requested_classes',
+            'processed_classes',
             'successful_classes',
             'failed_classes',
             'requested_periods',
