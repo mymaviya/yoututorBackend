@@ -17,107 +17,119 @@ use App\Models\TimetableRule;
 use App\Models\TimetableTemplate;
 use App\Models\User;
 use App\Models\WeeklyTimetable;
+use Illuminate\Database\Eloquent\Builder;
 
 class DashboardService
 {
-    public function dashboard(): array
+    public function dashboard(int $subscriptionId): array
     {
+        $readiness = $this->readiness($subscriptionId);
+
         return [
-            'statistics' => $this->statistics(),
-            'readiness' => $this->readiness(),
-            'warnings' => $this->warnings(),
+            'statistics' => $this->statistics($subscriptionId),
+            'readiness' => $readiness,
+            'warnings' => $this->warningsFromChecks($readiness['checks']),
         ];
     }
 
-    public function statistics(): array
+    public function statistics(int $subscriptionId): array
     {
         return [
-            'academic_years' => AcademicYear::count(),
-            'teachers' => User::teachers()->count(),
-            'teacher_assignments' => TeacherAssignment::count(),
-            'teacher_availability' => TeacherAvailability::count(),
-            'teacher_workload' => TeacherWorkloadSetting::count(),
-            'mother_teachers' => MotherTeacherSetting::count(),
-            'teacher_substitutions' => TeacherSubstitution::count(),
-            'subject_allocations' => SubjectPeriodAllocation::count(),
-            'parallel_groups' => ParallelGroup::count(),
-            'rooms' => Room::count(),
-            'rules' => TimetableRule::count(),
-            'templates' => TimetableTemplate::count(),
-            'bell_settings' => BellScheduleSetting::count(),
-            'school_bells' => SchoolBell::count(),
-            'weekly_timetables' => WeeklyTimetable::count(),
+            'academic_years' => $this->tenantQuery(AcademicYear::class, $subscriptionId)->count(),
+            'teachers' => User::query()
+                ->teachers()
+                ->where('subscription_id', $subscriptionId)
+                ->count(),
+            'teacher_assignments' => $this->tenantQuery(TeacherAssignment::class, $subscriptionId)->count(),
+            'teacher_availability' => $this->tenantQuery(TeacherAvailability::class, $subscriptionId)->count(),
+            'teacher_workload' => $this->tenantQuery(TeacherWorkloadSetting::class, $subscriptionId)->count(),
+            'mother_teachers' => $this->tenantQuery(MotherTeacherSetting::class, $subscriptionId)->count(),
+            'teacher_substitutions' => $this->tenantQuery(TeacherSubstitution::class, $subscriptionId)->count(),
+            'subject_allocations' => $this->tenantQuery(SubjectPeriodAllocation::class, $subscriptionId)->count(),
+            'parallel_groups' => $this->tenantQuery(ParallelGroup::class, $subscriptionId)->count(),
+            'rooms' => $this->tenantQuery(Room::class, $subscriptionId)->count(),
+            'rules' => $this->tenantQuery(TimetableRule::class, $subscriptionId)->count(),
+            'templates' => $this->tenantQuery(TimetableTemplate::class, $subscriptionId)->count(),
+            'bell_settings' => $this->tenantQuery(BellScheduleSetting::class, $subscriptionId)->count(),
+            'school_bells' => $this->tenantQuery(SchoolBell::class, $subscriptionId)->count(),
+            'weekly_timetables' => $this->tenantQuery(WeeklyTimetable::class, $subscriptionId)->count(),
         ];
     }
 
-    public function readiness(): array
+    public function readiness(int $subscriptionId): array
     {
         $checks = [
-            'academic_year' => AcademicYear::where('is_active', true)->exists(),
-            'bell_schedule_setting' => BellScheduleSetting::where('is_active', true)->exists(),
-            'school_bells' => SchoolBell::where('is_active', true)->exists(),
-            'template' => TimetableTemplate::where('is_active', true)->exists(),
-            'teacher_assignment' => TeacherAssignment::where('is_active', true)->exists(),
-            'teacher_availability' => TeacherAvailability::where('is_active', true)->exists(),
-            'teacher_workload' => TeacherWorkloadSetting::where('is_active', true)->exists(),
-            'subject_allocation' => SubjectPeriodAllocation::where('is_active', true)->exists(),
-            'rooms' => Room::where('is_active', true)->exists(),
-            'rules' => TimetableRule::where('is_active', true)->exists(),
+            'academic_year' => $this->activeExists(AcademicYear::class, $subscriptionId),
+            'bell_schedule_setting' => $this->activeExists(BellScheduleSetting::class, $subscriptionId),
+            'school_bells' => $this->activeExists(SchoolBell::class, $subscriptionId),
+            'template' => $this->activeExists(TimetableTemplate::class, $subscriptionId),
+            'teacher_assignment' => $this->activeExists(TeacherAssignment::class, $subscriptionId),
+            'teacher_availability' => $this->activeExists(TeacherAvailability::class, $subscriptionId),
+            'teacher_workload' => $this->activeExists(TeacherWorkloadSetting::class, $subscriptionId),
+            'subject_allocation' => $this->activeExists(SubjectPeriodAllocation::class, $subscriptionId),
+            'rooms' => $this->activeExists(Room::class, $subscriptionId),
+            'rules' => $this->activeExists(TimetableRule::class, $subscriptionId),
         ];
 
         $passed = collect($checks)->filter()->count();
         $total = count($checks);
 
         return [
-            'overall_score' => $total ? round(($passed / $total) * 100) : 0,
+            'overall_score' => $total > 0
+                ? (int) round(($passed / $total) * 100)
+                : 0,
+            'passed_checks' => $passed,
+            'total_checks' => $total,
+            'is_ready' => $passed === $total,
             'checks' => $checks,
         ];
     }
 
-    public function warnings(): array
+    public function warnings(int $subscriptionId): array
     {
-        $warnings = [];
+        return $this->warningsFromChecks(
+            $this->readiness($subscriptionId)['checks']
+        );
+    }
 
-        if (! AcademicYear::where('is_active', true)->exists()) {
-            $warnings[] = 'Academic Year is not configured.';
-        }
+    private function warningsFromChecks(array $checks): array
+    {
+        $messages = [
+            'academic_year' => 'Academic Year is not configured.',
+            'bell_schedule_setting' => 'Bell Schedule Setting is missing.',
+            'school_bells' => 'School Bells are not generated.',
+            'template' => 'Timetable Template is missing.',
+            'teacher_assignment' => 'No Teacher Assignments found.',
+            'teacher_availability' => 'Teacher Availability is not configured.',
+            'teacher_workload' => 'Teacher Workload Settings are missing.',
+            'subject_allocation' => 'Subject Period Allocation is missing.',
+            'rooms' => 'Rooms are not configured.',
+            'rules' => 'Timetable Rules are missing.',
+        ];
 
-        if (! BellScheduleSetting::where('is_active', true)->exists()) {
-            $warnings[] = 'Bell Schedule Setting is missing.';
-        }
+        return collect($checks)
+            ->reject()
+            ->keys()
+            ->map(fn (string $key) => $messages[$key] ?? "{$key} is not configured.")
+            ->values()
+            ->all();
+    }
 
-        if (! SchoolBell::where('is_active', true)->exists()) {
-            $warnings[] = 'School Bells are not generated.';
-        }
+    private function activeExists(string $modelClass, int $subscriptionId): bool
+    {
+        return $this->tenantQuery($modelClass, $subscriptionId)
+            ->where('is_active', true)
+            ->exists();
+    }
 
-        if (! TimetableTemplate::where('is_active', true)->exists()) {
-            $warnings[] = 'Timetable Template is missing.';
-        }
+    private function tenantQuery(string $modelClass, int $subscriptionId): Builder
+    {
+        /** @var \Illuminate\Database\Eloquent\Model $model */
+        $model = new $modelClass();
 
-        if (! TeacherAssignment::where('is_active', true)->exists()) {
-            $warnings[] = 'No Teacher Assignments found.';
-        }
-
-        if (! TeacherAvailability::where('is_active', true)->exists()) {
-            $warnings[] = 'Teacher Availability is not configured.';
-        }
-
-        if (! TeacherWorkloadSetting::where('is_active', true)->exists()) {
-            $warnings[] = 'Teacher Workload Settings are missing.';
-        }
-
-        if (! SubjectPeriodAllocation::where('is_active', true)->exists()) {
-            $warnings[] = 'Subject Period Allocation is missing.';
-        }
-
-        if (! Room::where('is_active', true)->exists()) {
-            $warnings[] = 'Rooms are not configured.';
-        }
-
-        if (! TimetableRule::where('is_active', true)->exists()) {
-            $warnings[] = 'Timetable Rules are missing.';
-        }
-
-        return $warnings;
+        return $modelClass::query()->where(
+            $model->qualifyColumn('subscription_id'),
+            $subscriptionId
+        );
     }
 }
