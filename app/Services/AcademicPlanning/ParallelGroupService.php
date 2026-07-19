@@ -58,10 +58,6 @@ class ParallelGroupService
     {
         $group->forceFill(['is_active' => $active])->save();
 
-        if (! $active) {
-            $group->items()->update(['is_active' => false]);
-        }
-
         return $group->fresh(['grade', 'items.subject', 'items.teacher']);
     }
 
