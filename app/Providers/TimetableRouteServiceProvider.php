@@ -19,6 +19,9 @@ class TimetableRouteServiceProvider extends ServiceProvider
             'role:admin,superadmin,super_admin',
         ])
             ->prefix('api')
-            ->group(base_path('routes/timetable_templates.php'));
+            ->group(function () {
+                require base_path('routes/timetable_templates.php');
+                require base_path('routes/timetable_rules.php');
+            });
     }
 }
