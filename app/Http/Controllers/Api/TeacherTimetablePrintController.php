@@ -17,7 +17,7 @@ class TeacherTimetablePrintController extends Controller
 
     public function print(Request $request): Response
     {
-        $subscriptionId = $this->subscriptionId();
+        $subscriptionId = $this->subscriptionId($request);
 
         $validated = $request->validate([
             'mode' => ['nullable', Rule::in(['teacher', 'class'])],
@@ -27,14 +27,22 @@ class TeacherTimetablePrintController extends Controller
                 ),
                 'nullable',
                 'integer',
-                Rule::exists('users', 'id')
-                    ->where('subscription_id', $subscriptionId),
+                Rule::exists('users', 'id')->where(
+                    fn ($query) => $query
+                        ->where('subscription_id', $subscriptionId)
+                        ->where('role', 'teacher')
+                        ->where('status', 'active')
+                        ->where('is_active', true)
+                ),
             ],
             'academic_year_id' => [
                 'nullable',
                 'integer',
-                Rule::exists('academic_years', 'id')
-                    ->where('subscription_id', $subscriptionId),
+                Rule::exists('academic_years', 'id')->where(
+                    fn ($query) => $query
+                        ->where('subscription_id', $subscriptionId)
+                        ->where('is_active', true)
+                ),
             ],
             'grade_id' => [
                 Rule::requiredIf(
@@ -60,18 +68,25 @@ class TeacherTimetablePrintController extends Controller
         ]);
 
         $mode = $validated['mode'] ?? 'teacher';
+        $academicYearId = isset($validated['academic_year_id'])
+            ? (int) $validated['academic_year_id']
+            : null;
 
         $data = $mode === 'teacher'
             ? $this->service->teacherTimetable(
                 teacherId: (int) $validated['teacher_id'],
-                academicYearId: $validated['academic_year_id'] ?? null,
+                academicYearId: $academicYearId,
                 subscriptionId: $subscriptionId,
             )
             : $this->service->classTimetable(
                 gradeId: (int) $validated['grade_id'],
-                sectionId: $validated['section_id'] ?? null,
-                streamId: $validated['stream_id'] ?? null,
-                academicYearId: $validated['academic_year_id'] ?? null,
+                sectionId: isset($validated['section_id'])
+                    ? (int) $validated['section_id']
+                    : null,
+                streamId: isset($validated['stream_id'])
+                    ? (int) $validated['stream_id']
+                    : null,
+                academicYearId: $academicYearId,
                 subscriptionId: $subscriptionId,
             );
 
@@ -86,7 +101,7 @@ class TeacherTimetablePrintController extends Controller
             'mode' => $mode,
             'filters' => [
                 'teacher_id' => $validated['teacher_id'] ?? null,
-                'academic_year_id' => $validated['academic_year_id'] ?? null,
+                'academic_year_id' => $academicYearId,
                 'grade_id' => $validated['grade_id'] ?? null,
                 'section_id' => $validated['section_id'] ?? null,
                 'stream_id' => $validated['stream_id'] ?? null,
@@ -96,10 +111,10 @@ class TeacherTimetablePrintController extends Controller
             ->download($filename);
     }
 
-    private function subscriptionId(): int
+    private function subscriptionId(Request $request): int
     {
-        $subscriptionId = auth()->user()?->subscription_id
-            ?? auth()->user()?->subscription?->id;
+        $subscriptionId = $request->user()?->subscription_id
+            ?? $request->user()?->subscription?->id;
 
         abort_if(
             ! is_numeric($subscriptionId) || (int) $subscriptionId <= 0,
