@@ -25,15 +25,12 @@ class TeacherTimetableService
         ?int $academicYearId,
         int $subscriptionId
     ): array {
-        $teacher = User::query()
-            ->where('subscription_id', $subscriptionId)
-            ->findOrFail($teacherId);
-
-        $bells = $this->bells($subscriptionId);
+        $teacher = $this->teacher($teacherId, $subscriptionId);
+        $bells = $this->bells();
         $entries = $this->teacherEntriesQuery(
-            teacherId: $teacherId,
-            academicYearId: $academicYearId,
-            subscriptionId: $subscriptionId,
+            $teacherId,
+            $academicYearId,
+            $subscriptionId
         )->get();
 
         return [
@@ -51,13 +48,13 @@ class TeacherTimetableService
         ?int $academicYearId,
         int $subscriptionId
     ): array {
-        $bells = $this->bells($subscriptionId);
+        $bells = $this->bells();
         $entries = $this->classEntriesQuery(
-            gradeId: $gradeId,
-            sectionId: $sectionId,
-            streamId: $streamId,
-            academicYearId: $academicYearId,
-            subscriptionId: $subscriptionId,
+            $gradeId,
+            $sectionId,
+            $streamId,
+            $academicYearId,
+            $subscriptionId
         )->get();
 
         return [
@@ -76,15 +73,15 @@ class TeacherTimetableService
         int $subscriptionId
     ): array {
         $weekday = now()->format('l');
-        $bells = $this->bells($subscriptionId);
+        $bells = $this->bells();
 
         $entries = TimetableEntry::query()
             ->with($this->entryRelations())
+            ->active()
             ->where('weekday', $weekday)
-            ->where('is_active', true)
             ->when(
                 $teacherId !== null,
-                fn (Builder $query) => $query->where('teacher_id', $teacherId)
+                fn (Builder $query) => $query->forTeacher($teacherId)
             )
             ->when(
                 $gradeId !== null,
@@ -114,10 +111,7 @@ class TeacherTimetableService
                     fn (Builder $weekly) => $weekly->where('academic_year_id', $academicYearId)
                 )
             )
-            ->whereHas(
-                'weeklyTimetable.template',
-                fn (Builder $template) => $template->where('subscription_id', $subscriptionId)
-            )
+            ->forSubscription($subscriptionId)
             ->orderBy('school_bell_id')
             ->get()
             ->map(fn (TimetableEntry $entry) => $this->transformEntry($entry));
@@ -135,15 +129,12 @@ class TeacherTimetableService
         ?int $academicYearId,
         int $subscriptionId
     ): array {
-        User::query()
-            ->where('subscription_id', $subscriptionId)
-            ->findOrFail($teacherId);
-
-        $bells = $this->bells($subscriptionId);
+        $this->teacher($teacherId, $subscriptionId);
+        $bells = $this->bells();
         $entries = $this->teacherEntriesQuery(
-            teacherId: $teacherId,
-            academicYearId: $academicYearId,
-            subscriptionId: $subscriptionId,
+            $teacherId,
+            $academicYearId,
+            $subscriptionId
         )->get();
 
         $freePeriods = [];
@@ -156,7 +147,7 @@ class TeacherTimetableService
                 ->all();
 
             $freePeriods[$weekday] = $bells
-                ->reject(fn ($bell) => in_array((int) $bell->id, $busyBellIds, true))
+                ->reject(fn (SchoolBell $bell) => in_array((int) $bell->id, $busyBellIds, true))
                 ->values();
         }
 
@@ -171,14 +162,11 @@ class TeacherTimetableService
         ?int $academicYearId,
         int $subscriptionId
     ): array {
-        User::query()
-            ->where('subscription_id', $subscriptionId)
-            ->findOrFail($teacherId);
-
+        $this->teacher($teacherId, $subscriptionId);
         $entries = $this->teacherEntriesQuery(
-            teacherId: $teacherId,
-            academicYearId: $academicYearId,
-            subscriptionId: $subscriptionId,
+            $teacherId,
+            $academicYearId,
+            $subscriptionId
         )->get();
 
         return [
@@ -193,9 +181,7 @@ class TeacherTimetableService
                 ->unique()
                 ->count(),
             'substitutions' => $entries
-                ->filter(
-                    fn ($entry) => (bool) ($entry->timetableEntry?->is_substitution ?? false)
-                )
+                ->filter(fn ($entry) => (bool) ($entry->timetableEntry?->is_substitution ?? false))
                 ->count(),
         ];
     }
@@ -206,15 +192,20 @@ class TeacherTimetableService
         int $subscriptionId
     ): Builder {
         return $this->baseEntriesQuery($subscriptionId)
-            ->where('teacher_id', $teacherId)
+            ->where(function (Builder $query) use ($teacherId) {
+                $query->where('teacher_id', $teacherId)
+                    ->orWhereHas(
+                        'timetableEntry',
+                        fn (Builder $entry) => $entry
+                            ->where('is_substitution', true)
+                            ->where('substitute_teacher_id', $teacherId)
+                    );
+            })
             ->when(
                 $academicYearId !== null,
                 fn (Builder $query) => $query->whereHas(
                     'timetableEntry.weeklyTimetable',
-                    fn (Builder $weekly) => $weekly->where(
-                        'academic_year_id',
-                        $academicYearId
-                    )
+                    fn (Builder $weekly) => $weekly->where('academic_year_id', $academicYearId)
                 )
             )
             ->orderByRaw($this->weekdayOrderSql())
@@ -229,23 +220,12 @@ class TeacherTimetableService
         int $subscriptionId
     ): Builder {
         return $this->baseEntriesQuery($subscriptionId)
-            ->where('grade_id', $gradeId)
-            ->when(
-                $sectionId !== null,
-                fn (Builder $query) => $query->where('section_id', $sectionId)
-            )
-            ->when(
-                $streamId !== null,
-                fn (Builder $query) => $query->where('stream_id', $streamId)
-            )
+            ->forClass($gradeId, $sectionId, $streamId)
             ->when(
                 $academicYearId !== null,
                 fn (Builder $query) => $query->whereHas(
                     'timetableEntry.weeklyTimetable',
-                    fn (Builder $weekly) => $weekly->where(
-                        'academic_year_id',
-                        $academicYearId
-                    )
+                    fn (Builder $weekly) => $weekly->where('academic_year_id', $academicYearId)
                 )
             )
             ->orderByRaw($this->weekdayOrderSql())
@@ -264,27 +244,29 @@ class TeacherTimetableService
                 'bell',
                 'timetableEntry.substituteTeacher:id,name,email',
             ])
-            ->where('is_active', true)
+            ->active()
+            ->forSubscription($subscriptionId)
             ->whereHas(
                 'timetableEntry',
-                fn (Builder $entry) => $entry->where('is_active', true)
-            )
-            ->whereHas(
-                'timetableEntry.weeklyTimetable.template',
-                fn (Builder $template) => $template->where(
-                    'subscription_id',
-                    $subscriptionId
-                )
+                fn (Builder $entry) => $entry->active()
             );
     }
 
-    private function bells(int $subscriptionId): Collection
+    private function teacher(int $teacherId, int $subscriptionId): User
     {
-        return SchoolBell::query()
+        return User::query()
+            ->teachers()
             ->where('subscription_id', $subscriptionId)
             ->where('is_active', true)
-            ->where('is_teaching_period', true)
-            ->orderBy('sort_order')
+            ->findOrFail($teacherId);
+    }
+
+    private function bells(): Collection
+    {
+        return SchoolBell::query()
+            ->active()
+            ->teachingPeriods()
+            ->ordered()
             ->get();
     }
 
@@ -299,13 +281,11 @@ class TeacherTimetableService
             'weekly_periods' => $entries->count(),
             'free_periods' => max($totalSlots - $entries->count(), 0),
             'substitutions' => $entries
-                ->filter(
-                    fn ($entry) => (bool) (
-                        $entry->timetableEntry?->is_substitution
-                        ?? $entry['is_substitution']
-                        ?? false
-                    )
-                )
+                ->filter(fn ($entry) => (bool) (
+                    $entry->timetableEntry?->is_substitution
+                    ?? $entry['is_substitution']
+                    ?? false
+                ))
                 ->count(),
             'subjects' => $entries
                 ->pluck('subject_id')
@@ -336,6 +316,7 @@ class TeacherTimetableService
             'timetable_entry_id' => $entry->id,
             'teacher_id' => $entry->teacher_id,
             'substitute_teacher_id' => $entry->substitute_teacher_id,
+            'effective_teacher_id' => $entry->effectiveTeacherId(),
             'grade_id' => $entry->weeklyTimetable?->grade_id,
             'section_id' => $entry->weeklyTimetable?->section_id,
             'stream_id' => $entry->weeklyTimetable?->stream_id,
@@ -358,14 +339,15 @@ class TeacherTimetableService
     private function weekdayOrderSql(): string
     {
         return <<<'SQL'
-CASE weekday
-    WHEN 'Monday' THEN 1
-    WHEN 'Tuesday' THEN 2
-    WHEN 'Wednesday' THEN 3
-    WHEN 'Thursday' THEN 4
-    WHEN 'Friday' THEN 5
-    WHEN 'Saturday' THEN 6
-    ELSE 7
+CASE LOWER(weekday)
+    WHEN 'monday' THEN 1
+    WHEN 'tuesday' THEN 2
+    WHEN 'wednesday' THEN 3
+    WHEN 'thursday' THEN 4
+    WHEN 'friday' THEN 5
+    WHEN 'saturday' THEN 6
+    WHEN 'sunday' THEN 7
+    ELSE 8
 END
 SQL;
     }
