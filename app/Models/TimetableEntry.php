@@ -17,11 +17,13 @@ class TimetableEntry extends Model
         'lesson_id',
         'parallel_group_id',
         'student_group_name',
+        'room_id',
         'room_no',
         'is_parallel',
         'is_substitution',
         'substitute_teacher_id',
         'remarks',
+        'is_locked',
         'is_active',
     ];
 
@@ -34,9 +36,11 @@ class TimetableEntry extends Model
         'subject_id' => 'integer',
         'lesson_id' => 'integer',
         'parallel_group_id' => 'integer',
+        'room_id' => 'integer',
         'substitute_teacher_id' => 'integer',
         'is_parallel' => 'boolean',
         'is_substitution' => 'boolean',
+        'is_locked' => 'boolean',
         'is_active' => 'boolean',
     ];
 
@@ -70,6 +74,11 @@ class TimetableEntry extends Model
         return $this->belongsTo(ParallelGroup::class, 'parallel_group_id');
     }
 
+    public function room(): BelongsTo
+    {
+        return $this->belongsTo(TimetableRoom::class, 'room_id');
+    }
+
     public function substituteTeacher(): BelongsTo
     {
         return $this->belongsTo(User::class, 'substitute_teacher_id');
@@ -77,18 +86,22 @@ class TimetableEntry extends Model
 
     public function scopeActive(Builder $query): Builder
     {
-        return $query->where(
-            $query->getModel()->qualifyColumn('is_active'),
-            true
-        );
+        return $query->where($query->getModel()->qualifyColumn('is_active'), true);
+    }
+
+    public function scopeLocked(Builder $query): Builder
+    {
+        return $query->where($query->getModel()->qualifyColumn('is_locked'), true);
+    }
+
+    public function scopeUnlocked(Builder $query): Builder
+    {
+        return $query->where($query->getModel()->qualifyColumn('is_locked'), false);
     }
 
     public function scopeForWeekday(Builder $query, int $weekday): Builder
     {
-        return $query->where(
-            $query->getModel()->qualifyColumn('weekday'),
-            $weekday
-        );
+        return $query->where($query->getModel()->qualifyColumn('weekday'), $weekday);
     }
 
     public function scopeForTeacher(
@@ -109,14 +122,16 @@ class TimetableEntry extends Model
         });
     }
 
+    public function scopeForRoom(Builder $query, int $roomId): Builder
+    {
+        return $query->where('room_id', $roomId);
+    }
+
     public function scopeForSubscription(Builder $query, int $subscriptionId): Builder
     {
         return $query->whereHas(
             'weeklyTimetable',
-            fn (Builder $timetableQuery) => $timetableQuery->where(
-                'subscription_id',
-                $subscriptionId
-            )
+            fn (Builder $timetableQuery) => $timetableQuery->where('subscription_id', $subscriptionId)
         );
     }
 
