@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Services\AcademicPlanning\DashboardService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AcademicPlanningController extends Controller
 {
@@ -12,47 +13,57 @@ class AcademicPlanningController extends Controller
         protected DashboardService $dashboardService
     ) {}
 
-    /**
-     * Academic Planning Dashboard
-     */
-    public function dashboard(): JsonResponse
+    public function dashboard(Request $request): JsonResponse
     {
         return response()->json([
             'success' => true,
-            'data' => $this->dashboardService->dashboard(),
+            'data' => $this->dashboardService->dashboard(
+                $this->subscriptionId($request)
+            ),
         ]);
     }
 
-    /**
-     * Readiness Summary
-     */
-    public function readiness(): JsonResponse
+    public function readiness(Request $request): JsonResponse
     {
         return response()->json([
             'success' => true,
-            'data' => $this->dashboardService->readiness(),
+            'data' => $this->dashboardService->readiness(
+                $this->subscriptionId($request)
+            ),
         ]);
     }
 
-    /**
-     * Dashboard Statistics
-     */
-    public function statistics(): JsonResponse
+    public function statistics(Request $request): JsonResponse
     {
         return response()->json([
             'success' => true,
-            'data' => $this->dashboardService->statistics(),
+            'data' => $this->dashboardService->statistics(
+                $this->subscriptionId($request)
+            ),
         ]);
     }
 
-    /**
-     * Dashboard Warnings
-     */
-    public function warnings(): JsonResponse
+    public function warnings(Request $request): JsonResponse
     {
         return response()->json([
             'success' => true,
-            'data' => $this->dashboardService->warnings(),
+            'data' => $this->dashboardService->warnings(
+                $this->subscriptionId($request)
+            ),
         ]);
+    }
+
+    private function subscriptionId(Request $request): int
+    {
+        $subscriptionId = $request->user()?->subscription_id
+            ?? $request->user()?->subscription?->id;
+
+        abort_if(
+            ! is_numeric($subscriptionId) || (int) $subscriptionId <= 0,
+            403,
+            'A valid subscription is required.'
+        );
+
+        return (int) $subscriptionId;
     }
 }
