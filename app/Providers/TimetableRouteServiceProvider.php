@@ -22,6 +22,7 @@ class TimetableRouteServiceProvider extends ServiceProvider
             ->group(function () {
                 require base_path('routes/timetable_templates.php');
                 require base_path('routes/timetable_rules.php');
+                require base_path('routes/timetable_generator.php');
             });
     }
 }
