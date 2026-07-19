@@ -2,7 +2,10 @@
 
 namespace App\Services\AcademicPlanning;
 
+use App\Models\Lesson;
+use App\Models\Subject;
 use App\Models\TimetableEntry;
+use App\Models\TimetableRoom;
 use App\Models\WeeklyTimetable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Arr;
@@ -14,15 +17,7 @@ class WeeklyTimetableEditorService
     public function grid(WeeklyTimetable $timetable): array
     {
         $entries = $timetable->entries()
-            ->with([
-                'bell',
-                'teacher:id,name,email',
-                'substituteTeacher:id,name,email',
-                'subject:id,name',
-                'lesson:id,name',
-                'room:id,name,code,room_type',
-                'parallelGroup:id,name',
-            ])
+            ->with($this->entryRelations())
             ->orderBy('weekday')
             ->orderBy('school_bell_id')
             ->orderBy('parallel_group_id')
@@ -46,16 +41,19 @@ class WeeklyTimetableEditorService
     public function create(WeeklyTimetable $timetable, array $data): TimetableEntry
     {
         $this->assertEditable($timetable);
+        $this->assertResourceContext($timetable, $data);
         $this->assertNoConflicts($timetable, $data);
 
-        return $timetable->entries()
-            ->create($this->normalizedPayload($data))
-            ->load($this->entryRelations());
+        $entry = $timetable->entries()->create($this->normalizedPayload($data));
+        $this->markDraft($timetable);
+
+        return $entry->load($this->entryRelations());
     }
 
     public function update(TimetableEntry $entry, array $data): TimetableEntry
     {
-        $this->assertEditable($entry->weeklyTimetable);
+        $timetable = $entry->weeklyTimetable;
+        $this->assertEditable($timetable);
 
         if ($entry->is_locked && ! ($data['allow_locked_update'] ?? false)) {
             throw ValidationException::withMessages([
@@ -70,15 +68,18 @@ class WeeklyTimetableEditorService
             'is_locked', 'is_active',
         ]), Arr::except($data, ['allow_locked_update']));
 
-        $this->assertNoConflicts($entry->weeklyTimetable, $payload, $entry->id);
+        $this->assertResourceContext($timetable, $payload);
+        $this->assertNoConflicts($timetable, $payload, $entry->id);
         $entry->fill($this->normalizedPayload($payload))->save();
+        $this->markDraft($timetable);
 
         return $entry->fresh($this->entryRelations());
     }
 
     public function delete(TimetableEntry $entry, bool $forceLocked = false): void
     {
-        $this->assertEditable($entry->weeklyTimetable);
+        $timetable = $entry->weeklyTimetable;
+        $this->assertEditable($timetable);
 
         if ($entry->is_locked && ! $forceLocked) {
             throw ValidationException::withMessages([
@@ -87,6 +88,7 @@ class WeeklyTimetableEditorService
         }
 
         $entry->delete();
+        $this->markDraft($timetable);
     }
 
     public function replaceGrid(
@@ -97,60 +99,43 @@ class WeeklyTimetableEditorService
         $this->assertEditable($timetable);
 
         return DB::transaction(function () use ($timetable, $entries, $preserveLocked): array {
-            $lockedIds = $preserveLocked
-                ? $timetable->entries()->locked()->pluck('id')->map(fn ($id) => (int) $id)->all()
-                : [];
+            $lockedEntries = $preserveLocked
+                ? $timetable->entries()->locked()->get()->keyBy('id')
+                : collect();
 
-            $keepIds = [];
+            foreach ($entries as $index => $payload) {
+                if (! isset($payload['id'])) {
+                    continue;
+                }
 
-            foreach (array_values($entries) as $index => $payload) {
-                $entryId = isset($payload['id']) ? (int) $payload['id'] : null;
-                $entry = $entryId
-                    ? $timetable->entries()->whereKey($entryId)->first()
-                    : null;
-
-                if ($entryId && ! $entry) {
+                $existing = $timetable->entries()->whereKey((int) $payload['id'])->first();
+                if (! $existing) {
                     throw ValidationException::withMessages([
                         "entries.{$index}.id" => 'The timetable entry does not belong to this timetable.',
                     ]);
                 }
-
-                if ($entry?->is_locked && $preserveLocked) {
-                    $keepIds[] = $entry->id;
-                    continue;
-                }
-
-                $this->assertNoConflicts(
-                    $timetable,
-                    $payload,
-                    $entry?->id,
-                    $keepIds
-                );
-
-                if ($entry) {
-                    $entry->fill($this->normalizedPayload($payload))->save();
-                } else {
-                    $entry = $timetable->entries()->create($this->normalizedPayload($payload));
-                }
-
-                $keepIds[] = (int) $entry->id;
             }
-
-            $keepIds = array_values(array_unique(array_merge($keepIds, $lockedIds)));
 
             $deleteQuery = $timetable->entries();
-            if ($keepIds !== []) {
-                $deleteQuery->whereNotIn('id', $keepIds);
-            }
             if ($preserveLocked) {
                 $deleteQuery->unlocked();
             }
             $deleteQuery->delete();
 
-            $timetable->forceFill([
-                'status' => WeeklyTimetable::STATUS_DRAFT,
-                'is_active' => true,
-            ])->save();
+            foreach (array_values($entries) as $payload) {
+                $entryId = isset($payload['id']) ? (int) $payload['id'] : null;
+
+                if ($preserveLocked && $entryId && $lockedEntries->has($entryId)) {
+                    continue;
+                }
+
+                $payload = Arr::except($payload, ['id']);
+                $this->assertResourceContext($timetable, $payload);
+                $this->assertNoConflicts($timetable, $payload);
+                $timetable->entries()->create($this->normalizedPayload($payload));
+            }
+
+            $this->markDraft($timetable);
 
             return $this->grid($timetable->fresh());
         });
@@ -165,11 +150,57 @@ class WeeklyTimetableEditorService
         }
     }
 
+    private function assertResourceContext(WeeklyTimetable $timetable, array $data): void
+    {
+        if (! empty($data['subject_id'])) {
+            $subject = Subject::query()
+                ->where('subscription_id', $timetable->subscription_id)
+                ->whereKey((int) $data['subject_id'])
+                ->first();
+
+            if (! $subject || (int) $subject->grade_id !== (int) $timetable->grade_id) {
+                throw ValidationException::withMessages([
+                    'subject_id' => 'The selected subject does not belong to this timetable grade.',
+                ]);
+            }
+        }
+
+        if (! empty($data['lesson_id'])) {
+            $lesson = Lesson::query()
+                ->where('subscription_id', $timetable->subscription_id)
+                ->whereKey((int) $data['lesson_id'])
+                ->first();
+
+            if (! $lesson
+                || (int) $lesson->grade_id !== (int) $timetable->grade_id
+                || (! empty($data['subject_id'])
+                    && (int) $lesson->subject_id !== (int) $data['subject_id'])) {
+                throw ValidationException::withMessages([
+                    'lesson_id' => 'The selected lesson does not match this timetable grade and subject.',
+                ]);
+            }
+        }
+
+        if (! empty($data['room_id'])) {
+            $room = TimetableRoom::query()
+                ->where('subscription_id', $timetable->subscription_id)
+                ->whereKey((int) $data['room_id'])
+                ->first();
+
+            if (! $room || ! $room->supportsSubject(
+                ! empty($data['subject_id']) ? (int) $data['subject_id'] : null
+            )) {
+                throw ValidationException::withMessages([
+                    'room_id' => 'The selected room does not support this subject.',
+                ]);
+            }
+        }
+    }
+
     private function assertNoConflicts(
         WeeklyTimetable $timetable,
         array $data,
-        ?int $excludedEntryId = null,
-        array $ignoredEntryIds = []
+        ?int $excludedEntryId = null
     ): void {
         $weekday = (int) $data['weekday'];
         $bellId = (int) $data['school_bell_id'];
@@ -182,7 +213,6 @@ class WeeklyTimetableEditorService
             ->active()
             ->forSlot($weekday, $bellId)
             ->when($excludedEntryId, fn (Builder $query) => $query->where('id', '!=', $excludedEntryId))
-            ->when($ignoredEntryIds !== [], fn (Builder $query) => $query->whereNotIn('id', $ignoredEntryIds))
             ->when(
                 $isParallel && $parallelGroupId,
                 fn (Builder $query) => $query->where(function (Builder $scope) use ($parallelGroupId) {
@@ -224,7 +254,6 @@ class WeeklyTimetableEditorService
                     });
                 })
                 ->when($excludedEntryId, fn (Builder $query) => $query->where('id', '!=', $excludedEntryId))
-                ->when($ignoredEntryIds !== [], fn (Builder $query) => $query->whereNotIn('id', $ignoredEntryIds))
                 ->exists();
 
             if ($teacherConflict) {
@@ -247,7 +276,6 @@ class WeeklyTimetableEditorService
                     );
                 })
                 ->when($excludedEntryId, fn (Builder $query) => $query->where('id', '!=', $excludedEntryId))
-                ->when($ignoredEntryIds !== [], fn (Builder $query) => $query->whereNotIn('id', $ignoredEntryIds))
                 ->exists();
 
             if ($roomConflict) {
@@ -256,6 +284,17 @@ class WeeklyTimetableEditorService
                 ]);
             }
         }
+    }
+
+    private function markDraft(WeeklyTimetable $timetable): void
+    {
+        $timetable->forceFill([
+            'status' => WeeklyTimetable::STATUS_DRAFT,
+            'is_active' => true,
+            'published_at' => null,
+            'published_by' => null,
+            'archived_at' => null,
+        ])->save();
     }
 
     private function normalizedPayload(array $data): array
