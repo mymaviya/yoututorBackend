@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class BellScheduleSetting extends Model
 {
     protected $fillable = [
+        'subscription_id',
         'name',
         'assembly_bell_time',
         'school_over_time',
@@ -32,6 +35,7 @@ class BellScheduleSetting extends Model
     ];
 
     protected $casts = [
+        'subscription_id' => 'integer',
         'total_periods' => 'integer',
         'teacher_arrival_before_assembly' => 'integer',
         'student_arrival_before_assembly' => 'integer',
@@ -51,4 +55,21 @@ class BellScheduleSetting extends Model
         'bus_dispersal_enabled' => 'boolean',
         'is_active' => 'boolean',
     ];
+
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
+    public function scopeForSubscription(
+        Builder $query,
+        int $subscriptionId
+    ): Builder {
+        return $query->where('subscription_id', $subscriptionId);
+    }
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->where('is_active', true);
+    }
 }
