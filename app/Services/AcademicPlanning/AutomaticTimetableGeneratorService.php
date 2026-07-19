@@ -14,9 +14,6 @@ use Illuminate\Validation\ValidationException;
 
 class AutomaticTimetableGeneratorService
 {
-    /**
-     * Generate or preview a timetable for one class scope.
-     */
     public function generate(int $subscriptionId, array $data, bool $preview = false): array
     {
         $workingDays = (int) ($data['working_days'] ?? 6);
@@ -50,17 +47,18 @@ class AutomaticTimetableGeneratorService
                 $data['stream_id'] ?? null
             )
             ->active()
+            ->where('weekly_periods', '>', 0)
             ->with(['subject:id,name', 'preferredTeacher:id,name'])
             ->ordered()
             ->get();
 
         if ($allocations->isEmpty()) {
             throw ValidationException::withMessages([
-                'allocations' => 'No active subject-period allocations were found for the selected class.',
+                'allocations' => 'No schedulable subject-period allocations were found for the selected class.',
             ]);
         }
 
-        $requiredPeriods = $allocations->sum('weekly_periods');
+        $requiredPeriods = (int) $allocations->sum('weekly_periods');
         $availableCapacity = $bells->count() * $workingDays;
 
         if ($requiredPeriods > $availableCapacity && ! $allowPartial) {
@@ -69,10 +67,11 @@ class AutomaticTimetableGeneratorService
             ]);
         }
 
+        $teacherIds = $allocations->pluck('preferred_teacher_id')->filter()->unique()->values();
         $availability = TeacherAvailability::query()
             ->where('subscription_id', $subscriptionId)
             ->active()
-            ->whereIn('teacher_id', $allocations->pluck('preferred_teacher_id')->filter()->unique())
+            ->whereIn('teacher_id', $teacherIds)
             ->get()
             ->keyBy(fn (TeacherAvailability $item) => $this->slotKey(
                 (int) $item->teacher_id,
@@ -80,17 +79,15 @@ class AutomaticTimetableGeneratorService
                 (int) $item->school_bell_id
             ));
 
-        $occupiedTeacherSlots = $this->occupiedTeacherSlots(
-            $subscriptionId,
-            $data['academic_year_id'] ?? null,
-            isset($data['weekly_timetable_id']) ? (int) $data['weekly_timetable_id'] : null
-        );
-
         $result = $this->buildSchedule(
             allocations: $allocations,
             bells: $bells,
             availability: $availability,
-            occupiedTeacherSlots: $occupiedTeacherSlots,
+            occupiedTeacherSlots: $this->occupiedTeacherSlots(
+                $subscriptionId,
+                $data['academic_year_id'] ?? null,
+                isset($data['weekly_timetable_id']) ? (int) $data['weekly_timetable_id'] : null
+            ),
             workingDays: $workingDays
         );
 
@@ -110,7 +107,6 @@ class AutomaticTimetableGeneratorService
 
         return DB::transaction(function () use ($subscriptionId, $data, $template, $result) {
             $timetable = $this->resolveTimetable($subscriptionId, $data, $template);
-
             $timetable->entries()->delete();
 
             foreach ($result['entries'] as $entry) {
@@ -130,13 +126,8 @@ class AutomaticTimetableGeneratorService
                 'preview' => false,
                 'weekly_timetable_id' => $timetable->id,
                 'timetable' => $timetable->fresh([
-                    'template',
-                    'grade',
-                    'section',
-                    'stream',
-                    'entries.bell',
-                    'entries.subject',
-                    'entries.teacher',
+                    'template', 'grade', 'section', 'stream',
+                    'entries.bell', 'entries.subject', 'entries.teacher',
                 ]),
             ]);
         });
@@ -158,28 +149,29 @@ class AutomaticTimetableGeneratorService
 
         $queue = $allocations
             ->flatMap(function (SubjectPeriodAllocation $allocation) {
-                return collect(range(1, max(0, (int) $allocation->weekly_periods)))
-                    ->map(fn () => $allocation);
+                $periods = max(0, (int) $allocation->weekly_periods);
+
+                return $periods === 0
+                    ? collect()
+                    : collect(range(1, $periods))->map(fn () => $allocation);
             })
             ->sortByDesc(function (SubjectPeriodAllocation $allocation) {
-                $score = ((int) $allocation->priority) * 100;
-                $score += $allocation->preferred_teacher_id ? 25 : 0;
-                $score += $allocation->prefer_double_period ? 10 : 0;
-                $score += $allocation->is_parallel_subject ? 5 : 0;
-
-                return $score;
+                return ((int) $allocation->priority * 100)
+                    + ($allocation->preferred_teacher_id ? 25 : 0)
+                    + ($allocation->prefer_double_period ? 10 : 0)
+                    + ($allocation->is_parallel_subject ? 5 : 0);
             })
             ->values();
 
         foreach ($queue as $allocation) {
             $candidate = $this->findBestSlot(
-                allocation: $allocation,
-                bells: $bells,
-                availability: $availability,
-                classSlots: $classSlots,
-                teacherSlots: $teacherSlots,
-                dailySubjectCounts: $dailySubjectCounts,
-                workingDays: $workingDays
+                $allocation,
+                $bells,
+                $availability,
+                $classSlots,
+                $teacherSlots,
+                $dailySubjectCounts,
+                $workingDays
             );
 
             if ($candidate === null) {
@@ -188,10 +180,11 @@ class AutomaticTimetableGeneratorService
                 continue;
             }
 
-            $weekday = $candidate['weekday'];
-            $bellId = $candidate['school_bell_id'];
-            $teacherId = $allocation->preferred_teacher_id ? (int) $allocation->preferred_teacher_id : null;
-            $classKey = $this->classSlotKey($weekday, $bellId);
+            $weekday = (int) $candidate['weekday'];
+            $bellId = (int) $candidate['school_bell_id'];
+            $teacherId = $allocation->preferred_teacher_id
+                ? (int) $allocation->preferred_teacher_id
+                : null;
 
             $entries[] = [
                 'weekday' => $weekday,
@@ -202,8 +195,7 @@ class AutomaticTimetableGeneratorService
                 'remarks' => null,
             ];
 
-            $classSlots[$classKey] = true;
-
+            $classSlots[$this->classSlotKey($weekday, $bellId)] = true;
             if ($teacherId !== null) {
                 $teacherSlots[$this->slotKey($teacherId, $weekday, $bellId)] = true;
             }
@@ -214,14 +206,14 @@ class AutomaticTimetableGeneratorService
                 ($scheduledBySubject[$allocation->subject_id] ?? 0) + 1;
         }
 
-        $requested = $allocations->sum('weekly_periods');
+        usort($entries, fn (array $a, array $b) => [$a['weekday'], $a['school_bell_id']]
+            <=> [$b['weekday'], $b['school_bell_id']]);
+
+        $requested = (int) $allocations->sum('weekly_periods');
         $scheduled = count($entries);
 
         return [
-            'entries' => collect($entries)
-                ->sortBy(['weekday', 'school_bell_id'])
-                ->values()
-                ->all(),
+            'entries' => $entries,
             'requested_periods' => $requested,
             'scheduled_periods' => $scheduled,
             'unscheduled_periods' => max(0, $requested - $scheduled),
@@ -252,9 +244,7 @@ class AutomaticTimetableGeneratorService
         for ($weekday = 1; $weekday <= $workingDays; $weekday++) {
             foreach ($bells as $bellIndex => $bell) {
                 $bellId = (int) $bell->id;
-                $classKey = $this->classSlotKey($weekday, $bellId);
-
-                if (isset($classSlots[$classKey])) {
+                if (isset($classSlots[$this->classSlotKey($weekday, $bellId)])) {
                     continue;
                 }
 
@@ -266,36 +256,30 @@ class AutomaticTimetableGeneratorService
                 $teacherId = $allocation->preferred_teacher_id
                     ? (int) $allocation->preferred_teacher_id
                     : null;
+                $teacherKey = $teacherId !== null
+                    ? $this->slotKey($teacherId, $weekday, $bellId)
+                    : null;
 
-                if ($teacherId !== null) {
-                    $teacherKey = $this->slotKey($teacherId, $weekday, $bellId);
+                if ($teacherKey !== null) {
                     if (isset($teacherSlots[$teacherKey])) {
                         continue;
                     }
-
-                    $status = $availability->get($teacherKey);
-                    if ($status?->isUnavailable()) {
+                    if ($availability->get($teacherKey)?->isUnavailable()) {
                         continue;
                     }
                 }
 
-                $score = 1000 - ($dailyCount * 150);
-                $score -= $weekday * 2;
-                $score -= $bellIndex;
-
+                $score = 1000 - ($dailyCount * 150) - ($weekday * 2) - $bellIndex;
                 if ($allocation->prefer_morning) {
                     $score += max(0, 30 - ($bellIndex * 5));
                 }
-
                 if ($allocation->prefer_last_period && $bellIndex === $bells->count() - 1) {
                     $score += 35;
                 }
-
                 if ($allocation->prefer_saturday && $weekday === 6) {
                     $score += 40;
                 }
-
-                if ($teacherId !== null && $availability->get($this->slotKey($teacherId, $weekday, $bellId))?->isPreferred()) {
+                if ($teacherKey !== null && $availability->get($teacherKey)?->isPreferred()) {
                     $score += 50;
                 }
 
@@ -324,18 +308,28 @@ class AutomaticTimetableGeneratorService
                     fn ($query) => $query->where('academic_year_id', $academicYearId)
                 )->when(
                     $excludedTimetableId !== null,
-                    fn ($query) => $query->whereKeyNot($excludedTimetableId)
+                    fn ($query) => $query->where('id', '!=', $excludedTimetableId)
                 );
             })
-            ->whereNotNull('teacher_id')
-            ->get(['teacher_id', 'weekday', 'school_bell_id'])
-            ->mapWithKeys(fn (TimetableEntry $entry) => [
-                $this->slotKey(
-                    (int) $entry->teacher_id,
-                    (int) $entry->weekday,
-                    (int) $entry->school_bell_id
-                ) => true,
+            ->where(function ($query) {
+                $query->whereNotNull('teacher_id')
+                    ->orWhereNotNull('substitute_teacher_id');
+            })
+            ->get([
+                'teacher_id', 'substitute_teacher_id', 'is_substitution',
+                'weekday', 'school_bell_id',
             ])
+            ->mapWithKeys(function (TimetableEntry $entry) {
+                $teacherId = $entry->effectiveTeacherId();
+
+                return $teacherId === null ? [] : [
+                    $this->slotKey(
+                        $teacherId,
+                        (int) $entry->weekday,
+                        (int) $entry->school_bell_id
+                    ) => true,
+                ];
+            })
             ->all();
     }
 
