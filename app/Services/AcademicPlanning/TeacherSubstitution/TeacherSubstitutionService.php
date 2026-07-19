@@ -3,8 +3,10 @@
 namespace App\Services\AcademicPlanning\TeacherSubstitution;
 
 use App\Models\TeacherSubstitution;
+use App\Models\TimetableEntry;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class TeacherSubstitutionService
 {
@@ -13,25 +15,24 @@ class TeacherSubstitutionService
     ) {}
 
     public function dashboard(
-        ?int $subscriptionId,
+        int $subscriptionId,
         string $date,
         ?int $academicYearId = null
     ): array {
-        $items = TeacherSubstitution::with([
-            'absentTeacher',
-            'substituteTeacher',
-            'grade',
-            'section',
-            'subject',
-            'bell',
-        ])
+        $items = TeacherSubstitution::query()
+            ->with($this->relations())
             ->where('subscription_id', $subscriptionId)
-            ->when($subscriptionId, fn ($query) => $query->where('subscription_id', $subscriptionId))
-            ->when($academicYearId, fn($query) => $query->where('academic_year_id', $academicYearId))
+            ->when(
+                $academicYearId,
+                fn ($query) => $query->where('academic_year_id', $academicYearId)
+            )
             ->whereDate('substitution_date', $date)
-            ->orderBy('school_bell_id')
-            ->latest()
-            ->get();
+            ->latest('id')
+            ->get()
+            ->sortBy(fn (TeacherSubstitution $item) =>
+                $item->timetableEntry?->bell?->sort_order ?? PHP_INT_MAX
+            )
+            ->values();
 
         $analytics = $this->statisticsService->dashboard(
             $subscriptionId,
@@ -49,28 +50,51 @@ class TeacherSubstitutionService
     public function create(array $data): TeacherSubstitution
     {
         return DB::transaction(function () use ($data) {
-            return TeacherSubstitution::updateOrCreate(
-                [
-                    'subscription_id' => $data['subscription_id'],
-                    'academic_year_id' => $data['academic_year_id'] ?? null,
-                    'teacher_availability_exception_id' => $data['teacher_availability_exception_id'] ?? null,
-                    'absent_teacher_id' => $data['absent_teacher_id'],
-                    'school_bell_id' => $data['school_bell_id'],
-                    'substitution_date' => $data['substitution_date'],
-                ],
-                [
-                    'timetable_entry_id' => $data['timetable_entry_id'] ?? null,
-                    'substitute_teacher_id' => $data['substitute_teacher_id'] ?? null,
-                    'grade_id' => $data['grade_id'] ?? null,
-                    'section_id' => $data['section_id'] ?? null,
-                    'subject_id' => $data['subject_id'] ?? null,
-                    'reason' => $data['reason'] ?? null,
-                    'remarks' => $data['remarks'] ?? null,
-                    'status' => $data['status'] ?? 'pending',
-                    'assigned_by' => $data['assigned_by'] ?? null,
-                    'is_active' => $data['is_active'] ?? true,
-                ]
-            )->fresh($this->relations());
+            $entry = TimetableEntry::query()
+                ->with(['weeklyTimetable.template', 'bell'])
+                ->forSubscription((int) $data['subscription_id'])
+                ->lockForUpdate()
+                ->findOrFail((int) $data['timetable_entry_id']);
+
+            if ((int) $entry->teacher_id !== (int) $data['original_teacher_id']) {
+                throw ValidationException::withMessages([
+                    'original_teacher_id' => 'The original teacher does not match the timetable entry.',
+                ]);
+            }
+
+            $existing = TeacherSubstitution::query()
+                ->where('subscription_id', (int) $data['subscription_id'])
+                ->where('timetable_entry_id', $entry->id)
+                ->whereDate('substitution_date', $data['substitution_date'])
+                ->lockForUpdate()
+                ->first();
+
+            $substitution = $existing ?? new TeacherSubstitution();
+
+            $substitution->fill([
+                'subscription_id' => (int) $data['subscription_id'],
+                'academic_year_id' => $data['academic_year_id'] ?? null,
+                'teacher_availability_exception_id' => $data['teacher_availability_exception_id'] ?? null,
+                'timetable_entry_id' => $entry->id,
+                'original_teacher_id' => (int) $data['original_teacher_id'],
+                'substitute_teacher_id' => (int) $data['substitute_teacher_id'],
+                'grade_id' => $data['grade_id'] ?? null,
+                'section_id' => $data['section_id'] ?? null,
+                'subject_id' => $data['subject_id'] ?? $entry->subject_id,
+                'substitution_date' => $data['substitution_date'],
+                'reason' => $data['reason'] ?? null,
+                'remarks' => $data['remarks'] ?? null,
+                'status' => $data['status'] ?? TeacherSubstitution::STATUS_PENDING,
+                'ai_score' => $data['ai_score'] ?? null,
+                'ai_reason' => $data['ai_reason'] ?? null,
+                'is_ai_suggested' => $data['is_ai_suggested'] ?? false,
+                'ai_suggestions' => $data['ai_suggestions'] ?? null,
+                'created_by' => (int) $data['created_by'],
+            ]);
+
+            $substitution->save();
+
+            return $substitution->fresh($this->relations());
         });
     }
 
@@ -83,8 +107,8 @@ class TeacherSubstitutionService
     ): TeacherSubstitution {
         $substitution->update([
             'substitute_teacher_id' => $substituteTeacherId,
-            'status' => 'assigned',
-            'assigned_by' => $assignedBy,
+            'status' => TeacherSubstitution::STATUS_APPROVED,
+            'created_by' => $assignedBy,
             'ai_score' => $aiScore,
             'ai_reason' => $aiReason,
             'is_ai_suggested' => $aiScore !== null,
@@ -98,9 +122,8 @@ class TeacherSubstitutionService
         int $approvedBy
     ): TeacherSubstitution {
         $substitution->update([
-            'status' => 'completed',
-            'approved_by' => $approvedBy,
-            'approved_at' => now(),
+            'status' => TeacherSubstitution::STATUS_COMPLETED,
+            'created_by' => $approvedBy,
         ]);
 
         return $substitution->fresh($this->relations());
@@ -111,7 +134,7 @@ class TeacherSubstitutionService
         ?string $remarks = null
     ): TeacherSubstitution {
         $substitution->update([
-            'status' => 'cancelled',
+            'status' => TeacherSubstitution::STATUS_REJECTED,
             'remarks' => $remarks,
         ]);
 
@@ -123,25 +146,36 @@ class TeacherSubstitutionService
         ?string $date = null,
         ?int $academicYearId = null
     ): Collection {
-        return TeacherSubstitution::with($this->relations())
+        return TeacherSubstitution::query()
+            ->with($this->relations())
             ->where('subscription_id', $subscriptionId)
-            ->where('status', 'pending')
-            ->when($academicYearId, fn($query) => $query->where('academic_year_id', $academicYearId))
-            ->when($date, fn($query) => $query->whereDate('substitution_date', $date))
+            ->where('status', TeacherSubstitution::STATUS_PENDING)
+            ->when(
+                $academicYearId,
+                fn ($query) => $query->where('academic_year_id', $academicYearId)
+            )
+            ->when(
+                $date,
+                fn ($query) => $query->whereDate('substitution_date', $date)
+            )
             ->orderBy('substitution_date')
-            ->orderBy('school_bell_id')
+            ->latest('id')
             ->get();
     }
 
     private function relations(): array
     {
         return [
+            'availabilityException',
+            'originalTeacher',
             'absentTeacher',
             'substituteTeacher',
             'grade',
             'section',
             'subject',
-            'bell',
+            'timetableEntry.bell',
+            'timetableEntry.weeklyTimetable',
+            'createdBy',
         ];
     }
 }
