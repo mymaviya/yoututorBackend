@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreTeacherAvailabilityRequest;
 use App\Http\Requests\UpdateTeacherAvailabilityRequest;
+use App\Models\SchoolBell;
+use App\Models\TeacherAvailability;
+use App\Models\User;
 use App\Services\TeacherAvailability\TeacherAvailabilityService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,6 +38,65 @@ class TeacherAvailabilityController extends Controller
                 (int) $validated['academic_year_id'],
                 (int) $validated['teacher_id']
             ),
+        ]);
+    }
+
+    /**
+     * Return the data needed by the weekly availability bulk editor.
+     */
+    public function bulkEditorData(Request $request): JsonResponse
+    {
+        $subscriptionId = (int) $request->user()->subscription_id;
+
+        $teachers = User::query()
+            ->where('subscription_id', $subscriptionId)
+            ->where('role', 'teacher')
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        $bells = SchoolBell::query()
+            ->active()
+            ->teachingPeriods()
+            ->whereNotNull('period_number')
+            ->ordered()
+            ->get([
+                'id',
+                'title',
+                'period_number',
+                'start_time',
+                'end_time',
+            ]);
+
+        $availability = TeacherAvailability::query()
+            ->where('subscription_id', $subscriptionId)
+            ->where('is_active', true)
+            ->with('bell')
+            ->ordered()
+            ->get()
+            ->groupBy('teacher_id');
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'teachers' => $teachers,
+                'bells' => $bells,
+                'availability' => $availability,
+                'weekdays' => [
+                    ['value' => 1, 'label' => 'Monday'],
+                    ['value' => 2, 'label' => 'Tuesday'],
+                    ['value' => 3, 'label' => 'Wednesday'],
+                    ['value' => 4, 'label' => 'Thursday'],
+                    ['value' => 5, 'label' => 'Friday'],
+                    ['value' => 6, 'label' => 'Saturday'],
+                    ['value' => 7, 'label' => 'Sunday'],
+                ],
+                'statuses' => [
+                    ['value' => 'available', 'label' => 'Available'],
+                    ['value' => 'preferred', 'label' => 'Preferred'],
+                    ['value' => 'unavailable', 'label' => 'Unavailable'],
+                ],
+            ],
         ]);
     }
 
