@@ -2,6 +2,7 @@
 
 namespace App\Services\TeacherAvailability;
 
+use App\Models\SchoolBell;
 use App\Models\TeacherAvailability;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +12,9 @@ class TeacherAvailabilityService
 {
     /**
      * Return weekly availability for a teacher.
+     *
+     * The academic year argument is retained for API compatibility. Weekly
+     * availability is currently stored independently of an academic year.
      */
     public function getWeeklyAvailability(
         int $subscriptionId,
@@ -19,26 +23,14 @@ class TeacherAvailabilityService
     ): Collection {
         return TeacherAvailability::query()
             ->where('subscription_id', $subscriptionId)
-            ->where('academic_year_id', $academicYearId)
             ->where('teacher_id', $teacherId)
+            ->with('bell')
             ->ordered()
             ->get();
     }
 
     /**
-     * Save complete weekly availability.
-     *
-     * Expected payload:
-     *
-     * [
-     *   [
-     *      'weekday' => 1,
-     *      'period_no' => 1,
-     *      'status' => 'available',
-     *      'reason_type' => null,
-     *      'reason' => null,
-     *   ]
-     * ]
+     * Save the complete weekly availability grid for a teacher.
      */
     public function saveWeeklyAvailability(
         int $subscriptionId,
@@ -46,36 +38,33 @@ class TeacherAvailabilityService
         int $teacherId,
         array $rows
     ): Collection {
+        $bellsByPeriod = $this->teachingBellsByPeriod();
 
         DB::transaction(function () use (
             $subscriptionId,
-            $academicYearId,
             $teacherId,
-            $rows
-        ) {
-
+            $rows,
+            $bellsByPeriod
+        ): void {
             TeacherAvailability::query()
                 ->where('subscription_id', $subscriptionId)
-                ->where('academic_year_id', $academicYearId)
                 ->where('teacher_id', $teacherId)
                 ->delete();
 
             foreach ($rows as $row) {
+                $this->validateRow($row, $bellsByPeriod);
 
-                $this->validateRow($row);
+                $periodNo = (int) $row['period_no'];
+                $bell = $bellsByPeriod->get($periodNo);
 
                 TeacherAvailability::create([
                     'subscription_id' => $subscriptionId,
-                    'academic_year_id' => $academicYearId,
                     'teacher_id' => $teacherId,
-
-                    'weekday' => $row['weekday'],
-                    'period_no' => $row['period_no'],
-
-                    'status' => $row['status'],
-
-                    'reason_type' => $row['reason_type'] ?? null,
+                    'weekday' => (int) $row['weekday'],
+                    'school_bell_id' => $bell->id,
+                    'status' => strtolower((string) $row['status']),
                     'reason' => $row['reason'] ?? null,
+                    'is_active' => true,
                 ]);
             }
         });
@@ -96,10 +85,9 @@ class TeacherAvailabilityService
         int $sourceTeacherId,
         int $destinationTeacherId
     ): Collection {
-
         if ($sourceTeacherId === $destinationTeacherId) {
             throw ValidationException::withMessages([
-                'teacher' => 'Source and destination teacher cannot be the same.',
+                'destination_teacher_id' => 'Source and destination teacher cannot be the same.',
             ]);
         }
 
@@ -111,31 +99,23 @@ class TeacherAvailabilityService
 
         DB::transaction(function () use (
             $subscriptionId,
-            $academicYearId,
             $destinationTeacherId,
             $records
-        ) {
-
+        ): void {
             TeacherAvailability::query()
                 ->where('subscription_id', $subscriptionId)
-                ->where('academic_year_id', $academicYearId)
                 ->where('teacher_id', $destinationTeacherId)
                 ->delete();
 
             foreach ($records as $record) {
-
                 TeacherAvailability::create([
                     'subscription_id' => $subscriptionId,
-                    'academic_year_id' => $academicYearId,
                     'teacher_id' => $destinationTeacherId,
-
                     'weekday' => $record->weekday,
-                    'period_no' => $record->period_no,
-
+                    'school_bell_id' => $record->school_bell_id,
                     'status' => $record->status,
-
-                    'reason_type' => $record->reason_type,
                     'reason' => $record->reason,
+                    'is_active' => $record->is_active,
                 ]);
             }
         });
@@ -148,7 +128,7 @@ class TeacherAvailabilityService
     }
 
     /**
-     * Check whether a teacher is available for a slot.
+     * Check whether a teacher is available for a timetable slot.
      */
     public function isTeacherAvailable(
         int $subscriptionId,
@@ -157,13 +137,19 @@ class TeacherAvailabilityService
         int $weekday,
         int $periodNo
     ): bool {
+        $bellId = $this->teachingBellsByPeriod()
+            ->get($periodNo)?->id;
+
+        if (!$bellId) {
+            return false;
+        }
 
         $availability = TeacherAvailability::query()
             ->where('subscription_id', $subscriptionId)
-            ->where('academic_year_id', $academicYearId)
             ->where('teacher_id', $teacherId)
             ->where('weekday', $weekday)
-            ->where('period_no', $periodNo)
+            ->where('school_bell_id', $bellId)
+            ->where('is_active', true)
             ->first();
 
         if (!$availability) {
@@ -171,7 +157,7 @@ class TeacherAvailabilityService
         }
 
         return in_array(
-            strtolower($availability->status),
+            strtolower((string) $availability->status),
             ['available', 'preferred'],
             true
         );
@@ -185,16 +171,14 @@ class TeacherAvailabilityService
         int $academicYearId,
         int $teacherId
     ): void {
-
         TeacherAvailability::query()
             ->where('subscription_id', $subscriptionId)
-            ->where('academic_year_id', $academicYearId)
             ->where('teacher_id', $teacherId)
             ->delete();
     }
 
     /**
-     * Create default availability for all slots.
+     * Create default availability for all requested teaching slots.
      */
     public function createDefaultAvailability(
         int $subscriptionId,
@@ -203,34 +187,36 @@ class TeacherAvailabilityService
         int $workingDays,
         int $periodsPerDay
     ): Collection {
+        $bells = $this->teachingBellsByPeriod()
+            ->take($periodsPerDay);
+
+        if ($bells->count() < $periodsPerDay) {
+            throw ValidationException::withMessages([
+                'periods_per_day' => 'The school bell schedule does not contain enough active teaching periods.',
+            ]);
+        }
 
         DB::transaction(function () use (
             $subscriptionId,
-            $academicYearId,
             $teacherId,
             $workingDays,
-            $periodsPerDay
-        ) {
-
+            $bells
+        ): void {
             TeacherAvailability::query()
                 ->where('subscription_id', $subscriptionId)
-                ->where('academic_year_id', $academicYearId)
                 ->where('teacher_id', $teacherId)
                 ->delete();
 
             for ($day = 1; $day <= $workingDays; $day++) {
-
-                for ($period = 1; $period <= $periodsPerDay; $period++) {
-
+                foreach ($bells as $bell) {
                     TeacherAvailability::create([
                         'subscription_id' => $subscriptionId,
-                        'academic_year_id' => $academicYearId,
                         'teacher_id' => $teacherId,
-
                         'weekday' => $day,
-                        'period_no' => $period,
-
+                        'school_bell_id' => $bell->id,
                         'status' => 'available',
+                        'reason' => null,
+                        'is_active' => true,
                     ]);
                 }
             }
@@ -246,32 +232,52 @@ class TeacherAvailabilityService
     /**
      * Validate one availability row.
      */
-    protected function validateRow(array $row): void
+    protected function validateRow(array $row, Collection $bellsByPeriod): void
     {
         if (
-            !isset($row['weekday']) ||
-            !isset($row['period_no']) ||
-            !isset($row['status'])
+            !array_key_exists('weekday', $row)
+            || !array_key_exists('period_no', $row)
+            || !array_key_exists('status', $row)
         ) {
             throw ValidationException::withMessages([
                 'availability' => 'Invalid availability row.',
             ]);
         }
 
-        if (
-            !in_array(
-                strtolower($row['status']),
-                [
-                    'available',
-                    'unavailable',
-                    'preferred',
-                ],
-                true
-            )
-        ) {
+        $weekday = (int) $row['weekday'];
+        $periodNo = (int) $row['period_no'];
+        $status = strtolower((string) $row['status']);
+
+        if ($weekday < 1 || $weekday > 7) {
             throw ValidationException::withMessages([
-                'status' => 'Invalid availability status.',
+                'availability' => 'Weekday must be between 1 and 7.',
             ]);
         }
+
+        if (!$bellsByPeriod->has($periodNo)) {
+            throw ValidationException::withMessages([
+                'availability' => "Teaching period {$periodNo} does not exist in the school bell schedule.",
+            ]);
+        }
+
+        if (!in_array($status, ['available', 'unavailable', 'preferred'], true)) {
+            throw ValidationException::withMessages([
+                'availability' => 'Invalid availability status.',
+            ]);
+        }
+    }
+
+    /**
+     * Return active teaching bells keyed by period number.
+     */
+    protected function teachingBellsByPeriod(): Collection
+    {
+        return SchoolBell::query()
+            ->active()
+            ->teachingPeriods()
+            ->whereNotNull('period_number')
+            ->ordered()
+            ->get()
+            ->keyBy(fn (SchoolBell $bell): int => (int) $bell->period_number);
     }
 }
