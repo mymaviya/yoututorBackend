@@ -32,6 +32,7 @@ class TeacherTimetable extends Model
         'subject_id' => 'integer',
         'school_bell_id' => 'integer',
         'is_active' => 'boolean',
+        'is_substitution' => 'boolean',
     ];
 
     public function timetableEntry(): BelongsTo
@@ -79,9 +80,24 @@ class TeacherTimetable extends Model
 
     public function scopeForTeacher(
         Builder $query,
-        int $teacherId
+        int $teacherId,
+        bool $includeSubstitutions = true
     ): Builder {
-        return $query->where('teacher_id', $teacherId);
+        return $query->where(function (Builder $teacherQuery) use (
+            $teacherId,
+            $includeSubstitutions
+        ) {
+            $teacherQuery->where('teacher_id', $teacherId);
+
+            if ($includeSubstitutions) {
+                $teacherQuery->orWhereHas(
+                    'timetableEntry',
+                    fn (Builder $entryQuery) => $entryQuery
+                        ->where('is_substitution', true)
+                        ->where('substitute_teacher_id', $teacherId)
+                );
+            }
+        });
     }
 
     public function scopeForClass(
@@ -106,6 +122,19 @@ class TeacherTimetable extends Model
                     $streamId
                 )
             );
+    }
+
+    public function scopeForAcademicYear(
+        Builder $query,
+        int $academicYearId
+    ): Builder {
+        return $query->whereHas(
+            'timetableEntry.weeklyTimetable',
+            fn (Builder $weekly) => $weekly->where(
+                'academic_year_id',
+                $academicYearId
+            )
+        );
     }
 
     public function scopeForSubscription(
