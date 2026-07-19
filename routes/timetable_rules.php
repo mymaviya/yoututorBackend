@@ -6,6 +6,12 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('timetable-rules')
     ->name('timetable.rules.')
     ->group(function () {
+        Route::get('/', [TimetableRuleController::class, 'index'])
+            ->name('index');
+
+        Route::post('/', [TimetableRuleController::class, 'store'])
+            ->name('store');
+
         Route::post('/{timetableRule}/activate', [TimetableRuleController::class, 'activate'])
             ->name('activate');
 
@@ -15,13 +21,12 @@ Route::prefix('timetable-rules')
         Route::post('/{timetableRule}/duplicate', [TimetableRuleController::class, 'duplicate'])
             ->name('duplicate');
 
-        Route::apiResource('/', TimetableRuleController::class)
-            ->parameters(['' => 'timetableRule'])
-            ->names([
-                'index' => 'index',
-                'store' => 'store',
-                'show' => 'show',
-                'update' => 'update',
-                'destroy' => 'destroy',
-            ]);
+        Route::get('/{timetableRule}', [TimetableRuleController::class, 'show'])
+            ->name('show');
+
+        Route::match(['put', 'patch'], '/{timetableRule}', [TimetableRuleController::class, 'update'])
+            ->name('update');
+
+        Route::delete('/{timetableRule}', [TimetableRuleController::class, 'destroy'])
+            ->name('destroy');
     });
