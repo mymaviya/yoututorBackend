@@ -56,6 +56,7 @@ class SubjectPeriodAllocationImport implements ToCollection
             ->values();
 
         $teachers = User::query()
+            ->teachers()
             ->where('subscription_id', $this->subscriptionId)
             ->whereIn('name', $teacherNames)
             ->get()
@@ -95,7 +96,7 @@ class SubjectPeriodAllocationImport implements ToCollection
             $teacher = $teacherName !== ''
                 ? $teachers->get($this->normaliseKey($teacherName))
                 : null;
-            $priority = $this->integerValue($row[10] ?? null, 5);
+            $priority = $this->integerValue($row[12] ?? null, 5);
 
             if (! in_array($category, self::CATEGORIES, true)) {
                 $errors["row_$excelRow"][] = 'Category must be one of: ' . implode(', ', self::CATEGORIES) . '.';
@@ -118,12 +119,12 @@ class SubjectPeriodAllocationImport implements ToCollection
             }
 
             if ($teacherName !== '' && ! $teacher) {
-                $errors["row_$excelRow"][] = "Preferred Teacher '$teacherName' was not found in this subscription.";
+                $errors["row_$excelRow"][] = "Preferred Teacher '$teacherName' was not found as a teacher in this subscription.";
             }
 
             $preferDouble = $this->booleanValue($row[5] ?? null);
-            $isParallel = $this->booleanValue($row[8] ?? null);
-            $parallelCode = $isParallel ? trim((string) ($row[9] ?? '')) : null;
+            $isParallel = $this->booleanValue($row[10] ?? null);
+            $parallelCode = $isParallel ? trim((string) ($row[11] ?? '')) : null;
 
             if ($preferDouble && $weeklyPeriods < 2) {
                 $errors["row_$excelRow"][] = 'Double Period requires at least two weekly periods.';
@@ -141,11 +142,13 @@ class SubjectPeriodAllocationImport implements ToCollection
                 'max_periods_per_day' => $maxPerDay,
                 'prefer_double_period' => $preferDouble,
                 'prefer_morning' => $this->booleanValue($row[6] ?? null),
-                'prefer_saturday' => $this->booleanValue($row[7] ?? null),
+                'prefer_last_period' => $this->booleanValue($row[7] ?? null),
+                'prefer_saturday' => $this->booleanValue($row[8] ?? null),
+                'is_optional' => $this->booleanValue($row[9] ?? null),
                 'is_parallel_subject' => $isParallel,
                 'parallel_group_code' => $parallelCode ?: null,
                 'priority' => $priority,
-                'is_active' => true,
+                'is_active' => $this->booleanValue($row[13] ?? 'yes'),
             ];
         }
 
