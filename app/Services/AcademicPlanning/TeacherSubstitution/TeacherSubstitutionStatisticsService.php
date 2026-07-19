@@ -4,17 +4,13 @@ namespace App\Services\AcademicPlanning\TeacherSubstitution;
 
 use App\Models\TeacherSubstitution;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 class TeacherSubstitutionStatisticsService
 {
-    private const STATUS_PENDING = 'pending';
-    private const STATUS_APPROVED = 'approved';
-    private const STATUS_REJECTED = 'rejected';
-    private const STATUS_COMPLETED = 'completed';
-
     public function dashboard(
-        ?int $subscriptionId,
+        int $subscriptionId,
         ?int $academicYearId,
         string|Carbon $date
     ): array {
@@ -24,10 +20,18 @@ class TeacherSubstitutionStatisticsService
             ->whereDate('substitution_date', $date);
 
         $total = (clone $baseQuery)->count();
-        $pending = (clone $baseQuery)->where('status', self::STATUS_PENDING)->count();
-        $approved = (clone $baseQuery)->where('status', self::STATUS_APPROVED)->count();
-        $completed = (clone $baseQuery)->where('status', self::STATUS_COMPLETED)->count();
-        $rejected = (clone $baseQuery)->where('status', self::STATUS_REJECTED)->count();
+        $pending = (clone $baseQuery)
+            ->where('status', TeacherSubstitution::STATUS_PENDING)
+            ->count();
+        $approved = (clone $baseQuery)
+            ->where('status', TeacherSubstitution::STATUS_APPROVED)
+            ->count();
+        $completed = (clone $baseQuery)
+            ->where('status', TeacherSubstitution::STATUS_COMPLETED)
+            ->count();
+        $rejected = (clone $baseQuery)
+            ->where('status', TeacherSubstitution::STATUS_REJECTED)
+            ->count();
 
         $autoAssigned = (clone $baseQuery)
             ->where('is_ai_suggested', true)
@@ -35,7 +39,11 @@ class TeacherSubstitutionStatisticsService
             ->count();
 
         $manualAssigned = (clone $baseQuery)
-            ->where('is_ai_suggested', false)
+            ->where(function (Builder $query) {
+                $query
+                    ->where('is_ai_suggested', false)
+                    ->orWhereNull('is_ai_suggested');
+            })
             ->whereNotNull('substitute_teacher_id')
             ->count();
 
@@ -46,21 +54,20 @@ class TeacherSubstitutionStatisticsService
                 'total' => $total,
                 'pending' => $pending,
 
-                // Frontend compatibility.
+                // Frontend compatibility aliases.
                 'assigned' => $approved,
-                'completed' => $completed,
                 'cancelled' => $rejected,
 
-                // DB-native status names.
+                // Database-native statuses.
                 'approved' => $approved,
                 'rejected' => $rejected,
+                'completed' => $completed,
 
                 'covered' => $covered,
                 'coverage_percentage' => $total > 0
                     ? round(($covered / $total) * 100, 2)
-                    : 0,
+                    : 0.0,
             ],
-
             'ai' => [
                 'auto_assigned' => $autoAssigned,
                 'manual_assigned' => $manualAssigned,
@@ -71,44 +78,38 @@ class TeacherSubstitutionStatisticsService
                     2
                 ),
             ],
-
             'status' => [
                 'pending' => $pending,
 
-                // Frontend compatibility.
+                // Frontend compatibility aliases.
                 'assigned' => $approved,
-                'completed' => $completed,
                 'cancelled' => $rejected,
 
-                // DB-native status names.
+                // Database-native statuses.
                 'approved' => $approved,
                 'rejected' => $rejected,
+                'completed' => $completed,
             ],
-
             'teacher_load' => $this->teacherLoad(
                 $subscriptionId,
                 $academicYearId,
                 $date
             ),
-
             'subject_analysis' => $this->subjectAnalysis(
                 $subscriptionId,
                 $academicYearId,
                 $date
             ),
-
             'grade_analysis' => $this->gradeAnalysis(
                 $subscriptionId,
                 $academicYearId,
                 $date
             ),
-
             'monthly_trend' => $this->monthlyTrend(
                 $subscriptionId,
                 $academicYearId,
                 $date
             ),
-
             'weekday_heatmap' => $this->weekdayHeatmap(
                 $subscriptionId,
                 $academicYearId,
@@ -118,25 +119,22 @@ class TeacherSubstitutionStatisticsService
     }
 
     private function teacherLoad(
-        ?int $subscriptionId,
+        int $subscriptionId,
         ?int $academicYearId,
         Carbon $date
     ): array {
         return $this->baseQuery($subscriptionId, $academicYearId)
-            ->select(
-                'substitute_teacher_id',
-                DB::raw('COUNT(*) as total')
-            )
+            ->select('substitute_teacher_id', DB::raw('COUNT(*) as total'))
             ->with('substituteTeacher:id,name,email')
             ->whereMonth('substitution_date', $date->month)
             ->whereYear('substitution_date', $date->year)
             ->whereNotNull('substitute_teacher_id')
-            ->whereNotIn('status', [self::STATUS_REJECTED])
+            ->where('status', '!=', TeacherSubstitution::STATUS_REJECTED)
             ->groupBy('substitute_teacher_id')
             ->orderByDesc('total')
             ->limit(10)
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn (TeacherSubstitution $row) => [
                 'teacher' => $row->substituteTeacher,
                 'total' => (int) $row->total,
             ])
@@ -145,24 +143,21 @@ class TeacherSubstitutionStatisticsService
     }
 
     private function subjectAnalysis(
-        ?int $subscriptionId,
+        int $subscriptionId,
         ?int $academicYearId,
         Carbon $date
     ): array {
         return $this->baseQuery($subscriptionId, $academicYearId)
-            ->select(
-                'subject_id',
-                DB::raw('COUNT(*) as total')
-            )
+            ->select('subject_id', DB::raw('COUNT(*) as total'))
             ->with('subject:id,name')
             ->whereMonth('substitution_date', $date->month)
             ->whereYear('substitution_date', $date->year)
             ->whereNotNull('subject_id')
-            ->whereNotIn('status', [self::STATUS_REJECTED])
+            ->where('status', '!=', TeacherSubstitution::STATUS_REJECTED)
             ->groupBy('subject_id')
             ->orderByDesc('total')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn (TeacherSubstitution $row) => [
                 'subject' => $row->subject,
                 'total' => (int) $row->total,
             ])
@@ -171,24 +166,21 @@ class TeacherSubstitutionStatisticsService
     }
 
     private function gradeAnalysis(
-        ?int $subscriptionId,
+        int $subscriptionId,
         ?int $academicYearId,
         Carbon $date
     ): array {
         return $this->baseQuery($subscriptionId, $academicYearId)
-            ->select(
-                'grade_id',
-                DB::raw('COUNT(*) as total')
-            )
+            ->select('grade_id', DB::raw('COUNT(*) as total'))
             ->with('grade:id,name')
             ->whereMonth('substitution_date', $date->month)
             ->whereYear('substitution_date', $date->year)
             ->whereNotNull('grade_id')
-            ->whereNotIn('status', [self::STATUS_REJECTED])
+            ->where('status', '!=', TeacherSubstitution::STATUS_REJECTED)
             ->groupBy('grade_id')
             ->orderByDesc('total')
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn (TeacherSubstitution $row) => [
                 'grade' => $row->grade,
                 'total' => (int) $row->total,
             ])
@@ -197,7 +189,7 @@ class TeacherSubstitutionStatisticsService
     }
 
     private function monthlyTrend(
-        ?int $subscriptionId,
+        int $subscriptionId,
         ?int $academicYearId,
         Carbon $date
     ): array {
@@ -207,11 +199,11 @@ class TeacherSubstitutionStatisticsService
                 DB::raw('COUNT(*) as total')
             )
             ->whereYear('substitution_date', $date->year)
-            ->whereNotIn('status', [self::STATUS_REJECTED])
+            ->where('status', '!=', TeacherSubstitution::STATUS_REJECTED)
             ->groupBy(DB::raw('MONTH(substitution_date)'))
             ->orderBy(DB::raw('MONTH(substitution_date)'))
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn (TeacherSubstitution $row) => [
                 'month' => (int) $row->month,
                 'total' => (int) $row->total,
             ])
@@ -220,7 +212,7 @@ class TeacherSubstitutionStatisticsService
     }
 
     private function weekdayHeatmap(
-        ?int $subscriptionId,
+        int $subscriptionId,
         ?int $academicYearId,
         Carbon $date
     ): array {
@@ -231,10 +223,10 @@ class TeacherSubstitutionStatisticsService
             )
             ->whereMonth('substitution_date', $date->month)
             ->whereYear('substitution_date', $date->year)
-            ->whereNotIn('status', [self::STATUS_REJECTED])
+            ->where('status', '!=', TeacherSubstitution::STATUS_REJECTED)
             ->groupBy(DB::raw('DAYNAME(substitution_date)'))
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn (TeacherSubstitution $row) => [
                 'weekday' => $row->weekday,
                 'total' => (int) $row->total,
             ])
@@ -243,17 +235,17 @@ class TeacherSubstitutionStatisticsService
     }
 
     private function baseQuery(
-        ?int $subscriptionId,
+        int $subscriptionId,
         ?int $academicYearId
-    ) {
+    ): Builder {
         return TeacherSubstitution::query()
+            ->where('subscription_id', $subscriptionId)
             ->when(
-                $subscriptionId,
-                fn ($query) => $query->where('subscription_id', $subscriptionId)
-            )
-            ->when(
-                $academicYearId,
-                fn ($query) => $query->where('academic_year_id', $academicYearId)
+                $academicYearId !== null,
+                fn (Builder $query) => $query->where(
+                    'academic_year_id',
+                    $academicYearId
+                )
             );
     }
 }
