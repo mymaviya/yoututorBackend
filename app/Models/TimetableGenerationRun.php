@@ -12,13 +12,23 @@ class TimetableGenerationRun extends Model
 {
     use BelongsToSubscription;
 
-    public const STATUSES = ['queued', 'running', 'completed', 'partial', 'failed'];
+    public const STATUSES = [
+        'queued',
+        'running',
+        'completed',
+        'partial',
+        'failed',
+        'cancelled',
+    ];
+
     public const MODES = ['single', 'batch'];
 
     protected $fillable = [
         'subscription_id',
         'user_id',
         'parent_run_id',
+        'queue_job_id',
+        'attempt_count',
         'mode',
         'is_preview',
         'status',
@@ -30,6 +40,8 @@ class TimetableGenerationRun extends Model
         'request_payload',
         'result_summary',
         'error_message',
+        'cancellation_requested_at',
+        'cancelled_at',
         'started_at',
         'completed_at',
     ];
@@ -38,6 +50,7 @@ class TimetableGenerationRun extends Model
         'subscription_id' => 'integer',
         'user_id' => 'integer',
         'parent_run_id' => 'integer',
+        'attempt_count' => 'integer',
         'is_preview' => 'boolean',
         'progress_percentage' => 'integer',
         'requested_items' => 'integer',
@@ -46,6 +59,8 @@ class TimetableGenerationRun extends Model
         'failed_items' => 'integer',
         'request_payload' => 'array',
         'result_summary' => 'array',
+        'cancellation_requested_at' => 'datetime',
+        'cancelled_at' => 'datetime',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
     ];
@@ -73,5 +88,21 @@ class TimetableGenerationRun extends Model
     public function scopeLatestFirst(Builder $query): Builder
     {
         return $query->orderByDesc('id');
+    }
+
+    public function isTerminal(): bool
+    {
+        return in_array($this->status, ['completed', 'partial', 'failed', 'cancelled'], true);
+    }
+
+    public function canBeCancelled(): bool
+    {
+        return in_array($this->status, ['queued', 'running'], true)
+            && $this->cancellation_requested_at === null;
+    }
+
+    public function cancellationRequested(): bool
+    {
+        return $this->cancellation_requested_at !== null;
     }
 }
