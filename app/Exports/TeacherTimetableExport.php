@@ -36,54 +36,38 @@ class TeacherTimetableExport implements
                 'subject:id,name',
                 'bell:id,title,start_time,end_time',
                 'timetableEntry:id,weekly_timetable_id,substitute_teacher_id,is_substitution,is_active',
-                'timetableEntry.substituteTeacher:id,name',
+                'timetableEntry.substituteTeacher:id,name,employee_code',
             ])
-            ->where('is_active', true)
+            ->active()
+            ->forSubscription($this->subscriptionId)
             ->whereHas(
                 'timetableEntry',
                 fn (Builder $entry) => $entry->where('is_active', true)
             )
-            ->whereHas(
-                'timetableEntry.weeklyTimetable.template',
-                fn (Builder $template) => $template->where(
-                    'subscription_id',
-                    $this->subscriptionId
-                )
-            )
             ->when(
                 $this->teacherId !== null,
-                fn (Builder $query) => $query->where('teacher_id', $this->teacherId)
+                fn (Builder $query) => $query->forTeacher(
+                    $this->teacherId,
+                    true
+                )
             )
             ->when(
                 $this->gradeId !== null,
-                fn (Builder $query) => $query->where('grade_id', $this->gradeId)
-            )
-            ->when(
-                $this->sectionId !== null,
-                fn (Builder $query) => $query->where('section_id', $this->sectionId)
-            )
-            ->when(
-                $this->streamId !== null,
-                fn (Builder $query) => $query->where('stream_id', $this->streamId)
-            )
-            ->when(
-                $this->academicYearId !== null,
-                fn (Builder $query) => $query->whereHas(
-                    'timetableEntry.weeklyTimetable',
-                    fn (Builder $weekly) => $weekly->where(
-                        'academic_year_id',
-                        $this->academicYearId
-                    )
+                fn (Builder $query) => $query->forClass(
+                    $this->gradeId,
+                    $this->sectionId,
+                    $this->streamId
                 )
             )
+            ->forAcademicYear($this->academicYearId)
             ->orderByRaw(<<<'SQL'
-                CASE weekday
-                    WHEN 'Monday' THEN 1
-                    WHEN 'Tuesday' THEN 2
-                    WHEN 'Wednesday' THEN 3
-                    WHEN 'Thursday' THEN 4
-                    WHEN 'Friday' THEN 5
-                    WHEN 'Saturday' THEN 6
+                CASE LOWER(weekday)
+                    WHEN 'monday' THEN 1
+                    WHEN 'tuesday' THEN 2
+                    WHEN 'wednesday' THEN 3
+                    WHEN 'thursday' THEN 4
+                    WHEN 'friday' THEN 5
+                    WHEN 'saturday' THEN 6
                     ELSE 7
                 END
                 SQL)
@@ -104,15 +88,20 @@ class TeacherTimetableExport implements
             'Stream',
             'Room',
             'Substitution',
-            'Substitute Teacher',
+            'Original Teacher',
         ];
     }
 
     public function map($row): array
     {
+        $isSubstitution = (bool) $row->timetableEntry?->is_substitution;
+        $effectiveTeacher = $isSubstitution
+            ? $row->timetableEntry?->substituteTeacher
+            : $row->teacher;
+
         return [
-            $row->teacher?->name,
-            $row->teacher?->employee_code,
+            $effectiveTeacher?->name,
+            $effectiveTeacher?->employee_code,
             $row->weekday,
             $row->bell?->title,
             $row->subject?->name,
@@ -120,8 +109,8 @@ class TeacherTimetableExport implements
             $row->section?->name,
             $row->stream?->name,
             $row->room_no,
-            $row->timetableEntry?->is_substitution ? 'Yes' : 'No',
-            $row->timetableEntry?->substituteTeacher?->name,
+            $isSubstitution ? 'Yes' : 'No',
+            $isSubstitution ? $row->teacher?->name : null,
         ];
     }
 }
