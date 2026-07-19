@@ -14,10 +14,18 @@ use Illuminate\Validation\ValidationException;
 
 class AutomaticTimetableGeneratorService
 {
+    public function __construct(
+        protected TimetableConstraintResolver $constraints
+    ) {}
+
     public function generate(int $subscriptionId, array $data, bool $preview = false): array
     {
         $workingDays = (int) ($data['working_days'] ?? 6);
         $allowPartial = (bool) ($data['allow_partial'] ?? false);
+        $academicYearId = isset($data['academic_year_id'])
+            ? (int) $data['academic_year_id']
+            : null;
+        $effectiveDate = $data['effective_from'] ?? now()->toDateString();
 
         $template = TimetableTemplate::query()
             ->where('subscription_id', $subscriptionId)
@@ -40,11 +48,11 @@ class AutomaticTimetableGeneratorService
 
         $allocations = SubjectPeriodAllocation::query()
             ->forSubscription($subscriptionId)
-            ->forAcademicYear($data['academic_year_id'] ?? null)
+            ->forAcademicYear($academicYearId)
             ->forClass(
                 (int) $data['grade_id'],
-                $data['section_id'] ?? null,
-                $data['stream_id'] ?? null
+                isset($data['section_id']) ? (int) $data['section_id'] : null,
+                isset($data['stream_id']) ? (int) $data['stream_id'] : null
             )
             ->active()
             ->where('weekly_periods', '>', 0)
@@ -67,7 +75,14 @@ class AutomaticTimetableGeneratorService
             ]);
         }
 
-        $teacherIds = $allocations->pluck('preferred_teacher_id')->filter()->unique()->values();
+        $this->constraints->load($subscriptionId, $academicYearId, $effectiveDate);
+
+        $teacherIds = $allocations
+            ->pluck('preferred_teacher_id')
+            ->filter()
+            ->unique()
+            ->values();
+
         $availability = TeacherAvailability::query()
             ->where('subscription_id', $subscriptionId)
             ->active()
@@ -79,15 +94,24 @@ class AutomaticTimetableGeneratorService
                 (int) $item->school_bell_id
             ));
 
+        $bellIndex = $bells->values()->mapWithKeys(
+            fn (SchoolBell $bell, int $index) => [(int) $bell->id => $index]
+        )->all();
+
+        $occupiedState = $this->occupiedTeacherState(
+            subscriptionId: $subscriptionId,
+            academicYearId: $academicYearId,
+            excludedTimetableId: isset($data['weekly_timetable_id'])
+                ? (int) $data['weekly_timetable_id']
+                : null,
+            bellIndex: $bellIndex
+        );
+
         $result = $this->buildSchedule(
             allocations: $allocations,
             bells: $bells,
             availability: $availability,
-            occupiedTeacherSlots: $this->occupiedTeacherSlots(
-                $subscriptionId,
-                $data['academic_year_id'] ?? null,
-                isset($data['weekly_timetable_id']) ? (int) $data['weekly_timetable_id'] : null
-            ),
+            occupiedState: $occupiedState,
             workingDays: $workingDays
         );
 
@@ -126,8 +150,13 @@ class AutomaticTimetableGeneratorService
                 'preview' => false,
                 'weekly_timetable_id' => $timetable->id,
                 'timetable' => $timetable->fresh([
-                    'template', 'grade', 'section', 'stream',
-                    'entries.bell', 'entries.subject', 'entries.teacher',
+                    'template',
+                    'grade',
+                    'section',
+                    'stream',
+                    'entries.bell',
+                    'entries.subject',
+                    'entries.teacher',
                 ]),
             ]);
         });
@@ -137,77 +166,91 @@ class AutomaticTimetableGeneratorService
         Collection $allocations,
         Collection $bells,
         Collection $availability,
-        array $occupiedTeacherSlots,
+        array $occupiedState,
         int $workingDays
     ): array {
         $entries = [];
         $classSlots = [];
-        $teacherSlots = $occupiedTeacherSlots;
+        $teacherSlots = $occupiedState['slots'];
+        $teacherDailyCounts = $occupiedState['daily_counts'];
+        $teacherWeeklyCounts = $occupiedState['weekly_counts'];
+        $teacherDayIndexes = $occupiedState['day_indexes'];
         $dailySubjectCounts = [];
         $scheduledBySubject = [];
         $warnings = [];
 
-        $queue = $allocations
-            ->flatMap(function (SubjectPeriodAllocation $allocation) {
-                $periods = max(0, (int) $allocation->weekly_periods);
+        $units = $this->buildSchedulingUnits($allocations);
 
-                return $periods === 0
-                    ? collect()
-                    : collect(range(1, $periods))->map(fn () => $allocation);
-            })
-            ->sortByDesc(function (SubjectPeriodAllocation $allocation) {
-                return ((int) $allocation->priority * 100)
-                    + ($allocation->preferred_teacher_id ? 25 : 0)
-                    + ($allocation->prefer_double_period ? 10 : 0)
-                    + ($allocation->is_parallel_subject ? 5 : 0);
-            })
-            ->values();
+        foreach ($units as $unit) {
+            /** @var SubjectPeriodAllocation $allocation */
+            $allocation = $unit['allocation'];
+            $size = (int) $unit['size'];
 
-        foreach ($queue as $allocation) {
-            $candidate = $this->findBestSlot(
-                $allocation,
-                $bells,
-                $availability,
-                $classSlots,
-                $teacherSlots,
-                $dailySubjectCounts,
-                $workingDays
+            $candidate = $this->findBestBlock(
+                allocation: $allocation,
+                size: $size,
+                bells: $bells,
+                availability: $availability,
+                classSlots: $classSlots,
+                teacherSlots: $teacherSlots,
+                teacherDailyCounts: $teacherDailyCounts,
+                teacherWeeklyCounts: $teacherWeeklyCounts,
+                teacherDayIndexes: $teacherDayIndexes,
+                dailySubjectCounts: $dailySubjectCounts,
+                workingDays: $workingDays
             );
 
             if ($candidate === null) {
                 $subjectName = $allocation->subject?->name ?? "Subject #{$allocation->subject_id}";
-                $warnings[] = "Could not place one period of {$subjectName}.";
+                $label = $size === 2 ? 'double period' : 'period';
+                $warnings[] = "Could not place one {$label} of {$subjectName}.";
                 continue;
             }
 
             $weekday = (int) $candidate['weekday'];
-            $bellId = (int) $candidate['school_bell_id'];
             $teacherId = $allocation->preferred_teacher_id
                 ? (int) $allocation->preferred_teacher_id
                 : null;
 
-            $entries[] = [
-                'weekday' => $weekday,
-                'school_bell_id' => $bellId,
-                'teacher_id' => $teacherId,
-                'subject_id' => (int) $allocation->subject_id,
-                'student_group_name' => $allocation->parallel_group_code,
-                'remarks' => null,
-            ];
+            foreach ($candidate['bells'] as $bellPosition => $bell) {
+                $bellId = (int) $bell->id;
+                $bellIndex = (int) $candidate['bell_indexes'][$bellPosition];
 
-            $classSlots[$this->classSlotKey($weekday, $bellId)] = true;
-            if ($teacherId !== null) {
-                $teacherSlots[$this->slotKey($teacherId, $weekday, $bellId)] = true;
+                $entries[] = [
+                    'weekday' => $weekday,
+                    'school_bell_id' => $bellId,
+                    'teacher_id' => $teacherId,
+                    'subject_id' => (int) $allocation->subject_id,
+                    'student_group_name' => $allocation->parallel_group_code,
+                    'remarks' => $size === 2 ? 'Generated double period' : null,
+                ];
+
+                $classSlots[$this->classSlotKey($weekday, $bellId)] = true;
+
+                if ($teacherId !== null) {
+                    $teacherSlots[$this->slotKey($teacherId, $weekday, $bellId)] = true;
+                    $teacherDailyCounts[$teacherId][$weekday] =
+                        ($teacherDailyCounts[$teacherId][$weekday] ?? 0) + 1;
+                    $teacherWeeklyCounts[$teacherId] =
+                        ($teacherWeeklyCounts[$teacherId] ?? 0) + 1;
+                    $teacherDayIndexes[$teacherId][$weekday][] = $bellIndex;
+                    $teacherDayIndexes[$teacherId][$weekday] = array_values(array_unique(
+                        $teacherDayIndexes[$teacherId][$weekday]
+                    ));
+                }
+
+                $dailySubjectCounts[$weekday][$allocation->subject_id] =
+                    ($dailySubjectCounts[$weekday][$allocation->subject_id] ?? 0) + 1;
+                $scheduledBySubject[$allocation->subject_id] =
+                    ($scheduledBySubject[$allocation->subject_id] ?? 0) + 1;
             }
-
-            $dailySubjectCounts[$weekday][$allocation->subject_id] =
-                ($dailySubjectCounts[$weekday][$allocation->subject_id] ?? 0) + 1;
-            $scheduledBySubject[$allocation->subject_id] =
-                ($scheduledBySubject[$allocation->subject_id] ?? 0) + 1;
         }
 
-        usort($entries, fn (array $a, array $b) => [$a['weekday'], $a['school_bell_id']]
-            <=> [$b['weekday'], $b['school_bell_id']]);
+        usort(
+            $entries,
+            fn (array $a, array $b) => [$a['weekday'], $a['school_bell_id']]
+                <=> [$b['weekday'], $b['school_bell_id']]
+        );
 
         $requested = (int) $allocations->sum('weekly_periods');
         $scheduled = count($entries);
@@ -220,72 +263,194 @@ class AutomaticTimetableGeneratorService
             'completion_percentage' => $requested > 0
                 ? round(($scheduled / $requested) * 100, 2)
                 : 100,
-            'subject_summary' => $allocations->map(fn (SubjectPeriodAllocation $allocation) => [
-                'subject_id' => $allocation->subject_id,
-                'subject_name' => $allocation->subject?->name,
-                'requested' => (int) $allocation->weekly_periods,
-                'scheduled' => (int) ($scheduledBySubject[$allocation->subject_id] ?? 0),
-            ])->values()->all(),
+            'subject_summary' => $allocations->map(
+                fn (SubjectPeriodAllocation $allocation) => [
+                    'subject_id' => $allocation->subject_id,
+                    'subject_name' => $allocation->subject?->name,
+                    'requested' => (int) $allocation->weekly_periods,
+                    'scheduled' => (int) ($scheduledBySubject[$allocation->subject_id] ?? 0),
+                    'double_period_preference' => (bool) $allocation->prefer_double_period,
+                ]
+            )->values()->all(),
+            'applied_rules' => $this->constraints->appliedRules(),
             'warnings' => array_values(array_unique($warnings)),
         ];
     }
 
-    private function findBestSlot(
+    private function buildSchedulingUnits(Collection $allocations): Collection
+    {
+        return $allocations
+            ->flatMap(function (SubjectPeriodAllocation $allocation) {
+                $periods = max(0, (int) $allocation->weekly_periods);
+                $units = collect();
+
+                if ($allocation->prefer_double_period) {
+                    $pairs = intdiv($periods, 2);
+                    for ($index = 0; $index < $pairs; $index++) {
+                        $units->push(['allocation' => $allocation, 'size' => 2]);
+                    }
+
+                    if ($periods % 2 === 1) {
+                        $units->push(['allocation' => $allocation, 'size' => 1]);
+                    }
+                } else {
+                    for ($index = 0; $index < $periods; $index++) {
+                        $units->push(['allocation' => $allocation, 'size' => 1]);
+                    }
+                }
+
+                return $units;
+            })
+            ->sortByDesc(function (array $unit) {
+                /** @var SubjectPeriodAllocation $allocation */
+                $allocation = $unit['allocation'];
+
+                return ((int) $allocation->priority * 100)
+                    + ((int) $unit['size'] * 50)
+                    + ($allocation->preferred_teacher_id ? 25 : 0)
+                    + ($allocation->is_parallel_subject ? 5 : 0);
+            })
+            ->values();
+    }
+
+    private function findBestBlock(
         SubjectPeriodAllocation $allocation,
+        int $size,
         Collection $bells,
         Collection $availability,
         array $classSlots,
         array $teacherSlots,
+        array $teacherDailyCounts,
+        array $teacherWeeklyCounts,
+        array $teacherDayIndexes,
         array $dailySubjectCounts,
         int $workingDays
     ): ?array {
         $candidates = collect();
+        $teacherId = $allocation->preferred_teacher_id
+            ? (int) $allocation->preferred_teacher_id
+            : null;
+        $maxTeacherDaily = max(1, $this->constraints->integer(
+            'teacher.max_daily_periods',
+            $bells->count()
+        ));
+        $maxTeacherWeekly = max(1, $this->constraints->integer(
+            'teacher.max_weekly_periods',
+            $bells->count() * $workingDays
+        ));
+        $maxConsecutive = max(1, $this->constraints->integer(
+            'teacher.max_consecutive_periods',
+            $bells->count()
+        ));
+        $spreadSubjects = $this->constraints->boolean('subject.spread_across_days', true);
 
         for ($weekday = 1; $weekday <= $workingDays; $weekday++) {
-            foreach ($bells as $bellIndex => $bell) {
-                $bellId = (int) $bell->id;
-                if (isset($classSlots[$this->classSlotKey($weekday, $bellId)])) {
+            for ($start = 0; $start <= $bells->count() - $size; $start++) {
+                $block = $bells->slice($start, $size)->values();
+
+                if ($size === 2 && ! $this->isConsecutiveTeachingBlock($block)) {
                     continue;
                 }
 
-                $dailyCount = (int) ($dailySubjectCounts[$weekday][$allocation->subject_id] ?? 0);
-                if ($dailyCount >= (int) $allocation->max_periods_per_day) {
+                $bellIds = $block->pluck('id')->map(fn ($id) => (int) $id)->all();
+                $bellIndexes = range($start, $start + $size - 1);
+
+                if ($this->hasClassConflict($weekday, $bellIds, $classSlots)) {
                     continue;
                 }
 
-                $teacherId = $allocation->preferred_teacher_id
-                    ? (int) $allocation->preferred_teacher_id
-                    : null;
-                $teacherKey = $teacherId !== null
-                    ? $this->slotKey($teacherId, $weekday, $bellId)
-                    : null;
+                $dailySubjectCount = (int) (
+                    $dailySubjectCounts[$weekday][$allocation->subject_id] ?? 0
+                );
 
-                if ($teacherKey !== null) {
-                    if (isset($teacherSlots[$teacherKey])) {
+                if ($dailySubjectCount + $size > (int) $allocation->max_periods_per_day) {
+                    continue;
+                }
+
+                if ($teacherId !== null && $this->hasTeacherConflict(
+                    teacherId: $teacherId,
+                    weekday: $weekday,
+                    bellIds: $bellIds,
+                    availability: $availability,
+                    teacherSlots: $teacherSlots
+                )) {
+                    continue;
+                }
+
+                if ($teacherId !== null) {
+                    $dailyTeacherCount = (int) ($teacherDailyCounts[$teacherId][$weekday] ?? 0);
+                    $weeklyTeacherCount = (int) ($teacherWeeklyCounts[$teacherId] ?? 0);
+
+                    if ($dailyTeacherCount + $size > $maxTeacherDaily) {
                         continue;
                     }
-                    if ($availability->get($teacherKey)?->isUnavailable()) {
+
+                    if ($weeklyTeacherCount + $size > $maxTeacherWeekly) {
+                        continue;
+                    }
+
+                    $prospectiveIndexes = array_merge(
+                        $teacherDayIndexes[$teacherId][$weekday] ?? [],
+                        $bellIndexes
+                    );
+
+                    if ($this->maximumConsecutiveRun($prospectiveIndexes) > $maxConsecutive) {
                         continue;
                     }
                 }
 
-                $score = 1000 - ($dailyCount * 150) - ($weekday * 2) - $bellIndex;
+                $hardViolation = $this->hasHardBlockedSlot(
+                    allocation: $allocation,
+                    teacherId: $teacherId,
+                    weekday: $weekday,
+                    bellIds: $bellIds
+                );
+
+                if ($hardViolation) {
+                    continue;
+                }
+
+                $score = 1000 - ($dailySubjectCount * 150) - ($weekday * 2) - $start;
+
+                if ($spreadSubjects && $dailySubjectCount > 0) {
+                    $score -= 100;
+                }
+
                 if ($allocation->prefer_morning) {
-                    $score += max(0, 30 - ($bellIndex * 5));
+                    $score += max(0, 30 - ($start * 5));
                 }
-                if ($allocation->prefer_last_period && $bellIndex === $bells->count() - 1) {
+
+                if ($allocation->prefer_last_period && $start + $size === $bells->count()) {
                     $score += 35;
                 }
+
                 if ($allocation->prefer_saturday && $weekday === 6) {
                     $score += 40;
                 }
-                if ($teacherKey !== null && $availability->get($teacherKey)?->isPreferred()) {
-                    $score += 50;
+
+                if ($size === 2 && $allocation->prefer_double_period) {
+                    $score += 80;
                 }
+
+                if ($teacherId !== null) {
+                    foreach ($bellIds as $bellId) {
+                        if ($availability->get($this->slotKey($teacherId, $weekday, $bellId))?->isPreferred()) {
+                            $score += 25;
+                        }
+                    }
+                }
+
+                $score += $this->softRuleScore(
+                    allocation: $allocation,
+                    teacherId: $teacherId,
+                    weekday: $weekday,
+                    bellIds: $bellIds
+                );
 
                 $candidates->push([
                     'weekday' => $weekday,
-                    'school_bell_id' => $bellId,
+                    'bells' => $block->all(),
+                    'bell_indexes' => $bellIndexes,
                     'score' => $score,
                 ]);
             }
@@ -294,12 +459,196 @@ class AutomaticTimetableGeneratorService
         return $candidates->sortByDesc('score')->first();
     }
 
-    private function occupiedTeacherSlots(
+    private function hasClassConflict(int $weekday, array $bellIds, array $classSlots): bool
+    {
+        foreach ($bellIds as $bellId) {
+            if (isset($classSlots[$this->classSlotKey($weekday, $bellId)])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hasTeacherConflict(
+        int $teacherId,
+        int $weekday,
+        array $bellIds,
+        Collection $availability,
+        array $teacherSlots
+    ): bool {
+        foreach ($bellIds as $bellId) {
+            $key = $this->slotKey($teacherId, $weekday, $bellId);
+
+            if (isset($teacherSlots[$key]) || $availability->get($key)?->isUnavailable()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isConsecutiveTeachingBlock(Collection $block): bool
+    {
+        if ($block->count() !== 2) {
+            return true;
+        }
+
+        /** @var SchoolBell $first */
+        $first = $block->get(0);
+        /** @var SchoolBell $second */
+        $second = $block->get(1);
+
+        $periodsConsecutive = $first->period_number === null
+            || $second->period_number === null
+            || (int) $second->period_number === (int) $first->period_number + 1;
+
+        $timesTouch = blank($first->end_time)
+            || blank($second->start_time)
+            || substr((string) $first->end_time, 0, 5) === substr((string) $second->start_time, 0, 5);
+
+        return $periodsConsecutive && $timesTouch;
+    }
+
+    private function hasHardBlockedSlot(
+        SubjectPeriodAllocation $allocation,
+        ?int $teacherId,
+        int $weekday,
+        array $bellIds
+    ): bool {
+        foreach ($bellIds as $bellId) {
+            if ($this->slotMatches(
+                $this->constraints->blockedClassSlots(),
+                $weekday,
+                $bellId
+            ) && $this->constraints->isHard('class.blocked_slots')) {
+                return true;
+            }
+
+            if ($teacherId !== null && $this->slotMatches(
+                $this->constraints->blockedTeacherSlots(),
+                $weekday,
+                $bellId,
+                teacherId: $teacherId
+            ) && $this->constraints->isHard('teacher.blocked_slots')) {
+                return true;
+            }
+
+            if ($this->slotMatches(
+                $this->constraints->blockedSubjectSlots(),
+                $weekday,
+                $bellId,
+                subjectId: (int) $allocation->subject_id
+            ) && $this->constraints->isHard('subject.blocked_slots')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function softRuleScore(
+        SubjectPeriodAllocation $allocation,
+        ?int $teacherId,
+        int $weekday,
+        array $bellIds
+    ): int {
+        $score = 0;
+
+        foreach ($bellIds as $bellId) {
+            if (! $this->constraints->isHard('class.blocked_slots') && $this->slotMatches(
+                $this->constraints->blockedClassSlots(),
+                $weekday,
+                $bellId
+            )) {
+                $score -= $this->constraints->priority('class.blocked_slots') * 20;
+            }
+
+            if ($teacherId !== null
+                && ! $this->constraints->isHard('teacher.blocked_slots')
+                && $this->slotMatches(
+                    $this->constraints->blockedTeacherSlots(),
+                    $weekday,
+                    $bellId,
+                    teacherId: $teacherId
+                )) {
+                $score -= $this->constraints->priority('teacher.blocked_slots') * 20;
+            }
+
+            if (! $this->constraints->isHard('subject.blocked_slots') && $this->slotMatches(
+                $this->constraints->blockedSubjectSlots(),
+                $weekday,
+                $bellId,
+                subjectId: (int) $allocation->subject_id
+            )) {
+                $score -= $this->constraints->priority('subject.blocked_slots') * 20;
+            }
+        }
+
+        return $score;
+    }
+
+    private function slotMatches(
+        array $slots,
+        int $weekday,
+        int $bellId,
+        ?int $teacherId = null,
+        ?int $subjectId = null
+    ): bool {
+        foreach ($slots as $slot) {
+            if ((int) $slot['weekday'] !== $weekday
+                || (int) $slot['school_bell_id'] !== $bellId) {
+                continue;
+            }
+
+            if ($teacherId !== null && (int) ($slot['teacher_id'] ?? 0) !== $teacherId) {
+                continue;
+            }
+
+            if ($subjectId !== null && (int) ($slot['subject_id'] ?? 0) !== $subjectId) {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private function maximumConsecutiveRun(array $indexes): int
+    {
+        $indexes = array_values(array_unique(array_map('intval', $indexes)));
+        sort($indexes);
+
+        $maximum = 0;
+        $current = 0;
+        $previous = null;
+
+        foreach ($indexes as $index) {
+            $current = $previous !== null && $index === $previous + 1
+                ? $current + 1
+                : 1;
+            $maximum = max($maximum, $current);
+            $previous = $index;
+        }
+
+        return $maximum;
+    }
+
+    private function occupiedTeacherState(
         int $subscriptionId,
         ?int $academicYearId,
-        ?int $excludedTimetableId
+        ?int $excludedTimetableId,
+        array $bellIndex
     ): array {
-        return TimetableEntry::query()
+        $state = [
+            'slots' => [],
+            'daily_counts' => [],
+            'weekly_counts' => [],
+            'day_indexes' => [],
+        ];
+
+        $entries = TimetableEntry::query()
             ->active()
             ->forSubscription($subscriptionId)
             ->whereHas('weeklyTimetable', function ($query) use ($academicYearId, $excludedTimetableId) {
@@ -316,21 +665,33 @@ class AutomaticTimetableGeneratorService
                     ->orWhereNotNull('substitute_teacher_id');
             })
             ->get([
-                'teacher_id', 'substitute_teacher_id', 'is_substitution',
-                'weekday', 'school_bell_id',
-            ])
-            ->mapWithKeys(function (TimetableEntry $entry) {
-                $teacherId = $entry->effectiveTeacherId();
+                'teacher_id',
+                'substitute_teacher_id',
+                'is_substitution',
+                'weekday',
+                'school_bell_id',
+            ]);
 
-                return $teacherId === null ? [] : [
-                    $this->slotKey(
-                        $teacherId,
-                        (int) $entry->weekday,
-                        (int) $entry->school_bell_id
-                    ) => true,
-                ];
-            })
-            ->all();
+        foreach ($entries as $entry) {
+            $teacherId = $entry->effectiveTeacherId();
+            if ($teacherId === null) {
+                continue;
+            }
+
+            $weekday = (int) $entry->weekday;
+            $bellId = (int) $entry->school_bell_id;
+            $state['slots'][$this->slotKey($teacherId, $weekday, $bellId)] = true;
+            $state['daily_counts'][$teacherId][$weekday] =
+                ($state['daily_counts'][$teacherId][$weekday] ?? 0) + 1;
+            $state['weekly_counts'][$teacherId] =
+                ($state['weekly_counts'][$teacherId] ?? 0) + 1;
+
+            if (array_key_exists($bellId, $bellIndex)) {
+                $state['day_indexes'][$teacherId][$weekday][] = $bellIndex[$bellId];
+            }
+        }
+
+        return $state;
     }
 
     private function resolveTimetable(
