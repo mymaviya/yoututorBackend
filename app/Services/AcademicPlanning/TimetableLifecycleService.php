@@ -29,7 +29,7 @@ class TimetableLifecycleService
                     $timetable->academic_year_id !== null,
                     fn ($query) => $query->where('academic_year_id', $timetable->academic_year_id)
                 )
-                ->whereKeyNot($timetable->getKey())
+                ->where($timetable->getQualifiedKeyName(), '!=', $timetable->getKey())
                 ->update([
                     'status' => WeeklyTimetable::STATUS_ARCHIVED,
                     'is_active' => false,
