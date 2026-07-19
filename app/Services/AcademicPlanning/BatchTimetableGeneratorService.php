@@ -4,6 +4,7 @@ namespace App\Services\AcademicPlanning;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 use Throwable;
 
 class BatchTimetableGeneratorService
@@ -15,7 +16,9 @@ class BatchTimetableGeneratorService
     public function generate(
         int $subscriptionId,
         array $data,
-        bool $preview = false
+        bool $preview = false,
+        ?callable $progressCallback = null,
+        ?callable $shouldCancel = null
     ): array {
         $atomic = (bool) ($data['atomic'] ?? false);
         $continueOnError = (bool) ($data['continue_on_error'] ?? true);
@@ -29,13 +32,22 @@ class BatchTimetableGeneratorService
             $classes,
             $preview,
             $atomic,
-            $continueOnError
+            $continueOnError,
+            $progressCallback,
+            $shouldCancel
         ): array {
             $results = [];
             $successful = 0;
             $failed = 0;
+            $processed = 0;
+            $cancelled = false;
 
             foreach ($classes as $index => $classData) {
+                if ($shouldCancel !== null && $shouldCancel()) {
+                    $cancelled = true;
+                    break;
+                }
+
                 $payload = array_merge(
                     [
                         'academic_year_id' => $data['academic_year_id'] ?? null,
@@ -81,16 +93,36 @@ class BatchTimetableGeneratorService
                         ]);
                     }
                 }
+
+                $processed++;
+
+                if ($progressCallback !== null) {
+                    $progressCallback([
+                        'processed_items' => $processed,
+                        'successful_items' => $successful,
+                        'failed_items' => $failed,
+                        'requested_items' => count($classes),
+                        'progress_percentage' => count($classes) > 0
+                            ? min(99, (int) floor(($processed / count($classes)) * 100))
+                            : 99,
+                    ]);
+                }
+            }
+
+            if ($cancelled && $atomic && ! $preview) {
+                throw new RuntimeException('Timetable batch generation was cancelled.');
             }
 
             return [
                 'preview' => $preview,
                 'atomic' => $atomic,
+                'cancelled' => $cancelled,
                 'requested_classes' => count($classes),
+                'processed_classes' => $processed,
                 'successful_classes' => $successful,
                 'failed_classes' => $failed,
                 'completion_percentage' => count($classes) > 0
-                    ? round(($successful / count($classes)) * 100, 2)
+                    ? round(($processed / count($classes)) * 100, 2)
                     : 100,
                 'results' => $results,
             ];
