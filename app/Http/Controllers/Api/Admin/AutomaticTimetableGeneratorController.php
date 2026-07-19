@@ -14,6 +14,78 @@ class AutomaticTimetableGeneratorController extends Controller
         protected AutomaticTimetableGeneratorService $service
     ) {}
 
+    public function constraints(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => [
+                [
+                    'rule_key' => 'teacher.max_daily_periods',
+                    'value_type' => 'integer',
+                    'default' => null,
+                    'constraint_type' => 'hard',
+                    'description' => 'Maximum periods a teacher may teach in one day.',
+                ],
+                [
+                    'rule_key' => 'teacher.max_weekly_periods',
+                    'value_type' => 'integer',
+                    'default' => null,
+                    'constraint_type' => 'hard',
+                    'description' => 'Maximum periods a teacher may teach in one week.',
+                ],
+                [
+                    'rule_key' => 'teacher.max_consecutive_periods',
+                    'value_type' => 'integer',
+                    'default' => null,
+                    'constraint_type' => 'hard',
+                    'description' => 'Maximum consecutive teaching periods allowed for a teacher.',
+                ],
+                [
+                    'rule_key' => 'subject.spread_across_days',
+                    'value_type' => 'boolean',
+                    'default' => true,
+                    'constraint_type' => 'soft',
+                    'description' => 'Prefer distributing a subject across different weekdays.',
+                ],
+                [
+                    'rule_key' => 'class.blocked_slots',
+                    'value_type' => 'json',
+                    'default' => [],
+                    'constraint_type' => 'hard_or_soft',
+                    'description' => 'Blocked class slots. Each item requires weekday and school_bell_id.',
+                    'item_schema' => [
+                        'weekday' => 'integer:1-7',
+                        'school_bell_id' => 'integer',
+                    ],
+                ],
+                [
+                    'rule_key' => 'teacher.blocked_slots',
+                    'value_type' => 'json',
+                    'default' => [],
+                    'constraint_type' => 'hard_or_soft',
+                    'description' => 'Blocked teacher slots.',
+                    'item_schema' => [
+                        'teacher_id' => 'integer',
+                        'weekday' => 'integer:1-7',
+                        'school_bell_id' => 'integer',
+                    ],
+                ],
+                [
+                    'rule_key' => 'subject.blocked_slots',
+                    'value_type' => 'json',
+                    'default' => [],
+                    'constraint_type' => 'hard_or_soft',
+                    'description' => 'Blocked subject slots.',
+                    'item_schema' => [
+                        'subject_id' => 'integer',
+                        'weekday' => 'integer:1-7',
+                        'school_bell_id' => 'integer',
+                    ],
+                ],
+            ],
+        ]);
+    }
+
     public function preview(Request $request): JsonResponse
     {
         $subscriptionId = $this->subscriptionId($request);
