@@ -79,11 +79,11 @@ use App\Http\Controllers\Api\SchoolNoticeController;
 
 use App\Http\Controllers\Api\Admin\AcademicPlanningController;
 use App\Http\Controllers\Api\Admin\SubjectPeriodAllocationController;
+use App\Http\Controllers\Api\Admin\TeacherAvailabilityController;
 
 
 use App\Http\Controllers\Api\SectionController;
 use App\Http\Controllers\Api\AcademicYearController;
-use App\Http\Controllers\Api\TeacherAvailabilityController;
 use App\Http\Controllers\Api\TeacherAvailabilityExceptionController;
 use App\Http\Controllers\Api\TeacherSubstitutionController;
 use App\Http\Controllers\Api\TeacherTimetableController;
@@ -642,12 +642,31 @@ Route::middleware([
 
         Route::apiResource('subject-period-allocations', SubjectPeriodAllocationController::class);
 
-        Route::prefix('teacher-availability')->group(function () {
+        Route::prefix('teacher-availability')
+            ->name('teacher.availability.')
+            ->group(function () {
 
-            Route::get('/bulk-editor-data', [TeacherAvailabilityController::class, 'bulkEditorData'])->name('teacher.availability.bulk-editor-data');
+                Route::get('/', [TeacherAvailabilityController::class, 'index'])
+                    ->name('index');
 
-            Route::apiResource('/', TeacherAvailabilityController::class);
-        });
+                Route::post('/', [TeacherAvailabilityController::class, 'store'])
+                    ->name('store');
+
+                Route::put('/{teacher}', [TeacherAvailabilityController::class, 'update'])
+                    ->name('update');
+
+                Route::delete('/{teacher}', [TeacherAvailabilityController::class, 'destroy'])
+                    ->name('destroy');
+
+                Route::post('/copy', [TeacherAvailabilityController::class, 'copy'])
+                    ->name('copy');
+
+                Route::post('/generate-default', [TeacherAvailabilityController::class, 'generateDefault'])
+                    ->name('generate-default');
+
+                Route::get('/bulk-editor-data', [TeacherAvailabilityController::class, 'bulkEditorData'])
+                    ->name('bulk-editor-data');
+            });
 
         Route::prefix('teacher-timetable')
             ->name('teacher.timetable.')
