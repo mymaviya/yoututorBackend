@@ -2,14 +2,19 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToSubscription;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Validation\ValidationException;
 
 class WeeklyTimetable extends Model
 {
+    use BelongsToSubscription;
+
     protected $fillable = [
+        'subscription_id',
         'academic_year_id',
         'name',
         'grade_id',
@@ -23,6 +28,7 @@ class WeeklyTimetable extends Model
 
     protected $casts = [
         'id' => 'integer',
+        'subscription_id' => 'integer',
         'academic_year_id' => 'integer',
         'grade_id' => 'integer',
         'section_id' => 'integer',
@@ -33,12 +39,45 @@ class WeeklyTimetable extends Model
         'is_generated' => 'boolean',
     ];
 
+    protected static function booted(): void
+    {
+        static::saving(function (WeeklyTimetable $timetable): void {
+            if (! $timetable->timetable_template_id) {
+                return;
+            }
+
+            $templateSubscriptionId = TimetableTemplate::query()
+                ->withoutGlobalScopes()
+                ->whereKey($timetable->timetable_template_id)
+                ->value('subscription_id');
+
+            if ($templateSubscriptionId === null) {
+                throw ValidationException::withMessages([
+                    'timetable_template_id' => 'The selected timetable template does not exist.',
+                ]);
+            }
+
+            if (
+                $timetable->subscription_id !== null
+                && (int) $timetable->subscription_id !== (int) $templateSubscriptionId
+            ) {
+                throw ValidationException::withMessages([
+                    'timetable_template_id' => 'The selected timetable template belongs to another subscription.',
+                ]);
+            }
+
+            $timetable->subscription_id = (int) $templateSubscriptionId;
+        });
+    }
+
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
     public function academicYear(): BelongsTo
     {
-        return $this->belongsTo(
-            AcademicYear::class,
-            'academic_year_id'
-        );
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
     }
 
     public function grade(): BelongsTo
@@ -58,10 +97,7 @@ class WeeklyTimetable extends Model
 
     public function entries(): HasMany
     {
-        return $this->hasMany(
-            TimetableEntry::class,
-            'weekly_timetable_id'
-        );
+        return $this->hasMany(TimetableEntry::class, 'weekly_timetable_id');
     }
 
     public function activeEntries(): HasMany
@@ -71,10 +107,7 @@ class WeeklyTimetable extends Model
 
     public function template(): BelongsTo
     {
-        return $this->belongsTo(
-            TimetableTemplate::class,
-            'timetable_template_id'
-        );
+        return $this->belongsTo(TimetableTemplate::class, 'timetable_template_id');
     }
 
     public function scopeActive(Builder $query): Builder
@@ -91,21 +124,14 @@ class WeeklyTimetable extends Model
         Builder $query,
         string|\DateTimeInterface|null $date = null
     ): Builder {
-        return $query->whereDate(
-            'effective_from',
-            '<=',
-            $date ?? now()
-        );
+        return $query->whereDate('effective_from', '<=', $date ?? now());
     }
 
     public function scopeForAcademicYear(
         Builder $query,
         int $academicYearId
     ): Builder {
-        return $query->where(
-            'academic_year_id',
-            $academicYearId
-        );
+        return $query->where('academic_year_id', $academicYearId);
     }
 
     public function scopeForClass(
@@ -118,17 +144,11 @@ class WeeklyTimetable extends Model
             ->where('grade_id', $gradeId)
             ->when(
                 $sectionId !== null,
-                fn (Builder $builder) => $builder->where(
-                    'section_id',
-                    $sectionId
-                )
+                fn (Builder $builder) => $builder->where('section_id', $sectionId)
             )
             ->when(
                 $streamId !== null,
-                fn (Builder $builder) => $builder->where(
-                    'stream_id',
-                    $streamId
-                )
+                fn (Builder $builder) => $builder->where('stream_id', $streamId)
             );
     }
 
@@ -136,13 +156,7 @@ class WeeklyTimetable extends Model
         Builder $query,
         int $subscriptionId
     ): Builder {
-        return $query->whereHas(
-            'template',
-            fn (Builder $templateQuery) => $templateQuery->where(
-                'subscription_id',
-                $subscriptionId
-            )
-        );
+        return $query->where('subscription_id', $subscriptionId);
     }
 
     public function scopeCurrent(Builder $query): Builder
