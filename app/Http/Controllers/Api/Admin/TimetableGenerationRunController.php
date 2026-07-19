@@ -25,29 +25,22 @@ class TimetableGenerationRunController extends Controller
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
-        $runs = TimetableGenerationRun::query()
-            ->where('subscription_id', $subscriptionId)
-            ->with('user:id,name,email')
-            ->withCount(['conflicts', 'retries'])
-            ->when($data['mode'] ?? null, fn ($query, $mode) => $query->where('mode', $mode))
-            ->when($data['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
-            ->when(
-                array_key_exists('is_preview', $data),
-                fn ($query) => $query->where('is_preview', $data['is_preview'])
-            )
-            ->latestFirst()
-            ->paginate($data['per_page'] ?? 20);
-
         return response()->json([
             'success' => true,
-            'data' => $runs,
+            'data' => TimetableGenerationRun::query()
+                ->where('subscription_id', $subscriptionId)
+                ->with('user:id,name,email')
+                ->withCount(['conflicts', 'retries'])
+                ->when($data['mode'] ?? null, fn ($query, $mode) => $query->where('mode', $mode))
+                ->when($data['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
+                ->when(array_key_exists('is_preview', $data), fn ($query) => $query->where('is_preview', $data['is_preview']))
+                ->latestFirst()
+                ->paginate($data['per_page'] ?? 20),
         ]);
     }
 
-    public function show(
-        Request $request,
-        TimetableGenerationRun $timetableGenerationRun
-    ): JsonResponse {
+    public function show(Request $request, TimetableGenerationRun $timetableGenerationRun): JsonResponse
+    {
         $this->ensureOwned($request, $timetableGenerationRun);
 
         return response()->json([
@@ -60,10 +53,8 @@ class TimetableGenerationRunController extends Controller
         ]);
     }
 
-    public function conflicts(
-        Request $request,
-        TimetableGenerationRun $timetableGenerationRun
-    ): JsonResponse {
+    public function conflicts(Request $request, TimetableGenerationRun $timetableGenerationRun): JsonResponse
+    {
         $this->ensureOwned($request, $timetableGenerationRun);
         $data = $request->validate([
             'severity' => ['nullable', Rule::in(['warning', 'error'])],
@@ -73,10 +64,7 @@ class TimetableGenerationRunController extends Controller
         return response()->json([
             'success' => true,
             'data' => $timetableGenerationRun->conflicts()
-                ->when(
-                    $data['severity'] ?? null,
-                    fn ($query, $severity) => $query->where('severity', $severity)
-                )
+                ->when($data['severity'] ?? null, fn ($query, $severity) => $query->where('severity', $severity))
                 ->orderBy('item_index')
                 ->orderByDesc('severity')
                 ->orderBy('id')
@@ -84,14 +72,45 @@ class TimetableGenerationRunController extends Controller
         ]);
     }
 
-    public function retry(
-        Request $request,
-        TimetableGenerationRun $timetableGenerationRun
-    ): JsonResponse {
+    public function retry(Request $request, TimetableGenerationRun $timetableGenerationRun): JsonResponse
+    {
         $this->ensureOwned($request, $timetableGenerationRun);
-        abort_if($timetableGenerationRun->status === 'running', 422, 'A running generation cannot be retried.');
+        abort_if(in_array($timetableGenerationRun->status, ['queued', 'running'], true), 422, 'A queued or running generation cannot be retried.');
 
+        $data = $request->validate([
+            'async' => ['nullable', 'boolean'],
+        ]);
         $payload = (array) $timetableGenerationRun->request_payload;
+        $async = (bool) ($data['async'] ?? true);
+
+        if ($async) {
+            $run = $timetableGenerationRun->mode === 'batch'
+                ? $this->service->queueBatch(
+                    (int) $timetableGenerationRun->subscription_id,
+                    $request->user()?->id,
+                    $payload,
+                    (bool) $timetableGenerationRun->is_preview,
+                    (int) $timetableGenerationRun->id
+                )
+                : $this->service->queueSingle(
+                    (int) $timetableGenerationRun->subscription_id,
+                    $request->user()?->id,
+                    $payload,
+                    (bool) $timetableGenerationRun->is_preview,
+                    (int) $timetableGenerationRun->id
+                );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Timetable generation retry queued successfully.',
+                'data' => [
+                    'generation_run_id' => $run->id,
+                    'generation_run_status' => $run->status,
+                    'parent_run_id' => $timetableGenerationRun->id,
+                ],
+            ], 202);
+        }
+
         $result = $timetableGenerationRun->mode === 'batch'
             ? $this->service->executeBatch(
                 (int) $timetableGenerationRun->subscription_id,
@@ -115,12 +134,22 @@ class TimetableGenerationRunController extends Controller
         ], 201);
     }
 
+    public function cancel(Request $request, TimetableGenerationRun $timetableGenerationRun): JsonResponse
+    {
+        $this->ensureOwned($request, $timetableGenerationRun);
+
+        return response()->json([
+            'success' => true,
+            'message' => $timetableGenerationRun->status === 'queued'
+                ? 'Queued timetable generation cancelled successfully.'
+                : 'Cancellation requested. The run will stop after the current class finishes.',
+            'data' => $this->service->requestCancellation($timetableGenerationRun),
+        ]);
+    }
+
     private function ensureOwned(Request $request, TimetableGenerationRun $run): void
     {
-        abort_unless(
-            (int) $run->subscription_id === $this->subscriptionId($request),
-            404
-        );
+        abort_unless((int) $run->subscription_id === $this->subscriptionId($request), 404);
     }
 
     private function subscriptionId(Request $request): int
@@ -128,11 +157,7 @@ class TimetableGenerationRunController extends Controller
         $subscriptionId = $request->user()?->subscription_id
             ?? $request->user()?->subscription?->id;
 
-        abort_if(
-            ! is_numeric($subscriptionId) || (int) $subscriptionId <= 0,
-            403,
-            'A valid subscription is required.'
-        );
+        abort_if(! is_numeric($subscriptionId) || (int) $subscriptionId <= 0, 403, 'A valid subscription is required.');
 
         return (int) $subscriptionId;
     }
