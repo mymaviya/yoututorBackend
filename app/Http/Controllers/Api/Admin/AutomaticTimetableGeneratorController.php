@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Services\AcademicPlanning\AdvancedTimetableGeneratorService;
+use App\Services\AcademicPlanning\TimetableGenerationRunService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -11,7 +11,7 @@ use Illuminate\Validation\Rule;
 class AutomaticTimetableGeneratorController extends Controller
 {
     public function __construct(
-        protected AdvancedTimetableGeneratorService $service
+        protected TimetableGenerationRunService $service
     ) {}
 
     public function constraints(): JsonResponse
@@ -101,7 +101,12 @@ class AutomaticTimetableGeneratorController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Timetable preview generated successfully.',
-            'data' => $this->service->generate($subscriptionId, $data, true),
+            'data' => $this->service->executeSingle(
+                $subscriptionId,
+                $request->user()?->id,
+                $data,
+                true
+            ),
         ]);
     }
 
@@ -113,7 +118,12 @@ class AutomaticTimetableGeneratorController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Timetable generated successfully.',
-            'data' => $this->service->generate($subscriptionId, $data, false),
+            'data' => $this->service->executeSingle(
+                $subscriptionId,
+                $request->user()?->id,
+                $data,
+                false
+            ),
         ], 201);
     }
 
@@ -134,13 +144,7 @@ class AutomaticTimetableGeneratorController extends Controller
                     fn ($query) => $query->where('subscription_id', $subscriptionId)
                 ),
             ],
-            'grade_id' => [
-                'required',
-                'integer',
-                Rule::exists('grades', 'id')->where(
-                    fn ($query) => $query->where('subscription_id', $subscriptionId)
-                ),
-            ],
+            'grade_id' => ['required', 'integer', 'exists:grades,id'],
             'section_id' => [
                 'nullable',
                 'integer',
