@@ -2,7 +2,7 @@
 
 namespace Tests\Unit\Timetable;
 
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 
 class SubjectPeriodAllocationValidationContractTest extends TestCase
 {
