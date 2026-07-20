@@ -21,6 +21,7 @@ class DatabaseSeeder extends Seeder
 
             // Sidebar menus use permission_slug and feature_key.
             SidebarMenuSeeder::class,
+            TimetableSidebarMenuSeeder::class,
 
             // Assign seeded permissions to roles.
             RolePermissionSeeder::class,
