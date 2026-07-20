@@ -534,14 +534,14 @@ class SubjectPeriodAllocationController extends Controller
             ->where('stream_id', $streamId);
     }
 
-    private function ownedExists(string $table, int $subscriptionId): Rule
+    private function ownedExists(string $table, int $subscriptionId)
     {
         return Rule::exists($table, 'id')->where(
             fn ($query) => $query->where('subscription_id', $subscriptionId)
         );
     }
 
-    private function sharedExists(string $table): Rule
+    private function sharedExists(string $table)
     {
         return Rule::exists($table, 'id');
     }
