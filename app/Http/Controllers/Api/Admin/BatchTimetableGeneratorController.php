@@ -81,8 +81,8 @@ class BatchTimetableGeneratorController extends Controller
             'classes' => ['required', 'array', 'min:1', 'max:50'],
             'classes.*.weekly_timetable_id' => ['nullable', 'integer', Rule::exists('weekly_timetables', 'id')->where(fn ($query) => $query->where('subscription_id', $subscriptionId))],
             'classes.*.grade_id' => ['required', 'integer', 'exists:grades,id'],
-            'classes.*.section_id' => ['nullable', 'integer', Rule::exists('sections', 'id')->where(fn ($query) => $query->where('subscription_id', $subscriptionId))],
-            'classes.*.stream_id' => ['nullable', 'integer', Rule::exists('streams', 'id')->where(fn ($query) => $query->where('subscription_id', $subscriptionId))],
+            'classes.*.section_id' => ['nullable', 'integer', 'exists:sections,id'],
+            'classes.*.stream_id' => ['nullable', 'integer', 'exists:streams,id'],
             'classes.*.name' => ['nullable', 'string', 'max:150'],
         ]);
     }
