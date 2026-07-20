@@ -7,21 +7,22 @@ use App\Services\AcademicPlanning\AutoSubstitutionGeneratorService;
 
 class TeacherAvailabilityExceptionObserver
 {
+    public function __construct(
+        protected AutoSubstitutionGeneratorService $generator
+    ) {}
+
     public function created(TeacherAvailabilityException $exception): void
     {
-        app(AutoSubstitutionGeneratorService::class)
-            ->generateFromAvailabilityException($exception);
+        $this->generator->generateFromAvailabilityException($exception);
     }
 
     public function updated(TeacherAvailabilityException $exception): void
     {
-        app(AutoSubstitutionGeneratorService::class)
-            ->regenerate($exception);
+        $this->generator->regenerate($exception);
     }
 
     public function deleted(TeacherAvailabilityException $exception): void
     {
-        app(AutoSubstitutionGeneratorService::class)
-            ->cancel($exception);
+        $this->generator->cancel($exception);
     }
 }
