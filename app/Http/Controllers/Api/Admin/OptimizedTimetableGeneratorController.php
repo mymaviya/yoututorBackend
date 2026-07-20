@@ -56,20 +56,8 @@ class OptimizedTimetableGeneratorController extends Controller
                 ),
             ],
             'grade_id' => ['required', 'integer', 'exists:grades,id'],
-            'section_id' => [
-                'nullable',
-                'integer',
-                Rule::exists('sections', 'id')->where(
-                    fn ($query) => $query->where('subscription_id', $subscriptionId)
-                ),
-            ],
-            'stream_id' => [
-                'nullable',
-                'integer',
-                Rule::exists('streams', 'id')->where(
-                    fn ($query) => $query->where('subscription_id', $subscriptionId)
-                ),
-            ],
+            'section_id' => ['nullable', 'integer', 'exists:sections,id'],
+            'stream_id' => ['nullable', 'integer', 'exists:streams,id'],
             'timetable_template_id' => [
                 'required',
                 'integer',
