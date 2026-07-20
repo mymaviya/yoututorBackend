@@ -32,6 +32,34 @@ class TimetableRouteContractTest extends TestCase
         $this->assertContains('auth:sanctum', $route->gatherMiddleware());
     }
 
+    public function test_teacher_availability_route_names_are_unique(): void
+    {
+        $routes = collect(app('router')->getRoutes()->getRoutes());
+        $namedRoutes = $routes
+            ->map(fn (Route $route): ?string => $route->getName())
+            ->filter();
+
+        $duplicates = $namedRoutes
+            ->countBy()
+            ->filter(fn (int $count): bool => $count > 1)
+            ->keys()
+            ->values();
+
+        $this->assertNotContains('teacher.availability.store', $duplicates->all());
+        $this->assertNotContains('teacher.availability.update', $duplicates->all());
+        $this->assertNotContains('teacher.availability.destroy', $duplicates->all());
+
+        $this->assertNotNull(
+            app('router')->getRoutes()->getByName('teacher.availability.exceptions.store')
+        );
+        $this->assertNotNull(
+            app('router')->getRoutes()->getByName('teacher.availability.exceptions.update')
+        );
+        $this->assertNotNull(
+            app('router')->getRoutes()->getByName('teacher.availability.exceptions.destroy')
+        );
+    }
+
     public static function timetableRouteProvider(): array
     {
         return [
