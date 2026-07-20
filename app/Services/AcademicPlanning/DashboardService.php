@@ -64,7 +64,7 @@ class DashboardService
             'school_bells' => $this->activeExists(SchoolBell::class, $subscriptionId),
             'template' => $this->activeExists(TimetableTemplate::class, $subscriptionId),
             'teacher_assignment' => $this->activeExists(TeacherAssignment::class, $subscriptionId),
-            'teacher_availability' => $this->activeExists(TeacherAvailability::class, $subscriptionId),
+            'teacher_availability' => $this->teacherAvailabilityConfigured($subscriptionId),
             'teacher_workload' => $this->activeExists(TeacherWorkloadSetting::class, $subscriptionId),
             'subject_allocation' => $this->activeExists(SubjectPeriodAllocation::class, $subscriptionId),
             'rooms' => $this->activeExists(Room::class, $subscriptionId),
@@ -113,6 +113,28 @@ class DashboardService
             ->map(fn (string $key) => $messages[$key] ?? "{$key} is not configured.")
             ->values()
             ->all();
+    }
+
+    /**
+     * Teacher availability overrides are optional.
+     *
+     * The timetable engine treats a missing availability row as available, so
+     * an empty availability table represents the valid default policy. Active
+     * rows, when present, simply override that default for selected slots.
+     */
+    private function teacherAvailabilityConfigured(int $subscriptionId): bool
+    {
+        $hasInvalidOverrides = $this->tenantQuery(TeacherAvailability::class, $subscriptionId)
+            ->where(function (Builder $query): void {
+                $query
+                    ->whereNull('teacher_id')
+                    ->orWhereNull('weekday')
+                    ->orWhereNull('school_bell_id')
+                    ->orWhereNotIn('status', ['available', 'preferred', 'unavailable']);
+            })
+            ->exists();
+
+        return ! $hasInvalidOverrides;
     }
 
     private function activeExists(string $modelClass, int $subscriptionId): bool
