@@ -20,12 +20,20 @@ class TimetableTemplateController extends Controller
         $subscriptionId = $this->subscriptionId($request);
         $data = $request->validate([
             'type' => ['nullable', Rule::in(TimetableTemplate::TYPES)],
-            'is_active' => ['nullable', 'boolean'],
-            'is_default' => ['nullable', 'boolean'],
+            'is_active' => ['nullable', Rule::in([true, false, 1, 0, '1', '0', 'true', 'false'])],
+            'is_default' => ['nullable', Rule::in([true, false, 1, 0, '1', '0', 'true', 'false'])],
             'effective_on' => ['nullable', 'date'],
             'search' => ['nullable', 'string', 'max:150'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
+
+        if (array_key_exists('is_active', $data)) {
+            $data['is_active'] = $this->normaliseBoolean($data['is_active']);
+        }
+
+        if (array_key_exists('is_default', $data)) {
+            $data['is_default'] = $this->normaliseBoolean($data['is_default']);
+        }
 
         $query = TimetableTemplate::query()
             ->where('subscription_id', $subscriptionId)
@@ -189,5 +197,10 @@ class TimetableTemplateController extends Controller
         );
 
         return (int) $subscriptionId;
+    }
+
+    private function normaliseBoolean(mixed $value): bool
+    {
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 }
