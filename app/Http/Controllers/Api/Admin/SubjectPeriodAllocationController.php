@@ -14,6 +14,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator as LaravelValidator;
 use Maatwebsite\Excel\Facades\Excel;
 
 class SubjectPeriodAllocationController extends Controller
@@ -161,7 +162,7 @@ class SubjectPeriodAllocationController extends Controller
     public function bulkEditorData(Request $request)
     {
         $subscriptionId = $this->subscriptionId();
-        $data = $request->validate($this->scopeRules($subscriptionId));
+        $data = $this->validateScope($request, $subscriptionId);
 
         $subjects = Subject::query()
             ->where('subscription_id', $subscriptionId)
@@ -213,16 +214,20 @@ class SubjectPeriodAllocationController extends Controller
     {
         $subscriptionId = $this->subscriptionId();
 
-        $data = $request->validate([
+        $validator = Validator::make($request->all(), [
             'from_academic_year_id' => ['nullable', $this->ownedExists('academic_years', $subscriptionId)],
             'to_academic_year_id' => ['nullable', $this->ownedExists('academic_years', $subscriptionId)],
-            'from_grade_id' => ['required', $this->ownedExists('grades', $subscriptionId)],
-            'to_grade_id' => ['required', $this->ownedExists('grades', $subscriptionId)],
-            'from_section_id' => ['nullable', $this->ownedExists('sections', $subscriptionId)],
-            'to_section_id' => ['nullable', $this->ownedExists('sections', $subscriptionId)],
-            'from_stream_id' => ['nullable', $this->ownedExists('streams', $subscriptionId)],
-            'to_stream_id' => ['nullable', $this->ownedExists('streams', $subscriptionId)],
+            'from_grade_id' => ['required', 'integer', $this->sharedExists('grades')],
+            'to_grade_id' => ['required', 'integer', $this->sharedExists('grades')],
+            'from_section_id' => ['nullable', 'integer', $this->sharedExists('sections')],
+            'to_section_id' => ['nullable', 'integer', $this->sharedExists('sections')],
+            'from_stream_id' => ['nullable', 'integer', $this->sharedExists('streams')],
+            'to_stream_id' => ['nullable', 'integer', $this->sharedExists('streams')],
         ]);
+
+        $this->addClassRelationshipValidation($validator, 'from_');
+        $this->addClassRelationshipValidation($validator, 'to_');
+        $data = $validator->validate();
 
         $sameScope = ($data['from_academic_year_id'] ?? null) == ($data['to_academic_year_id'] ?? null)
             && (int) $data['from_grade_id'] === (int) $data['to_grade_id']
@@ -300,7 +305,7 @@ class SubjectPeriodAllocationController extends Controller
     public function export(Request $request)
     {
         $subscriptionId = $this->subscriptionId();
-        $data = $request->validate($this->scopeRules($subscriptionId));
+        $data = $this->validateScope($request, $subscriptionId);
 
         return Excel::download(
             new SubjectPeriodAllocationExport(
@@ -317,9 +322,11 @@ class SubjectPeriodAllocationController extends Controller
     public function import(Request $request)
     {
         $subscriptionId = $this->subscriptionId();
-        $data = $request->validate(array_merge($this->scopeRules($subscriptionId), [
+        $validator = Validator::make($request->all(), array_merge($this->scopeRules($subscriptionId), [
             'file' => 'required|file|mimes:xlsx,xls,csv|max:10240',
         ]));
+        $this->addClassRelationshipValidation($validator);
+        $data = $validator->validate();
 
         Excel::import(
             new SubjectPeriodAllocationImport(
@@ -345,6 +352,7 @@ class SubjectPeriodAllocationController extends Controller
             array_merge($this->scopeRules($subscriptionId), $this->itemRules($subscriptionId))
         );
 
+        $this->addClassRelationshipValidation($validator);
         $this->addLogicalValidation($validator, fn () => [$request->all()]);
 
         return $validator->validate();
@@ -362,14 +370,23 @@ class SubjectPeriodAllocationController extends Controller
         $rules['items.*.subject_id'][] = 'distinct';
 
         $validator = Validator::make($request->all(), $rules);
+        $this->addClassRelationshipValidation($validator);
         $this->addLogicalValidation($validator, fn () => $request->input('items', []));
 
         return $validator->validate();
     }
 
-    private function addLogicalValidation($validator, callable $itemsResolver): void
+    private function validateScope(Request $request, int $subscriptionId): array
     {
-        $validator->after(function ($validator) use ($itemsResolver) {
+        $validator = Validator::make($request->all(), $this->scopeRules($subscriptionId));
+        $this->addClassRelationshipValidation($validator);
+
+        return $validator->validate();
+    }
+
+    private function addLogicalValidation(LaravelValidator $validator, callable $itemsResolver): void
+    {
+        $validator->after(function (LaravelValidator $validator) use ($itemsResolver) {
             foreach ($itemsResolver() as $index => $item) {
                 $label = isset($item['subject_name'])
                     ? $item['subject_name']
@@ -402,21 +419,66 @@ class SubjectPeriodAllocationController extends Controller
         });
     }
 
+    private function addClassRelationshipValidation(LaravelValidator $validator, string $prefix = ''): void
+    {
+        $validator->after(function (LaravelValidator $validator) use ($prefix) {
+            $data = $validator->getData();
+            $gradeId = isset($data[$prefix . 'grade_id']) ? (int) $data[$prefix . 'grade_id'] : null;
+            $sectionId = isset($data[$prefix . 'section_id']) ? (int) $data[$prefix . 'section_id'] : null;
+            $streamId = isset($data[$prefix . 'stream_id']) ? (int) $data[$prefix . 'stream_id'] : null;
+
+            if (!$gradeId) {
+                return;
+            }
+
+            if ($sectionId) {
+                $sectionMatches = DB::table('sections')
+                    ->where('id', $sectionId)
+                    ->where('grade_id', $gradeId)
+                    ->when($streamId, fn ($query) => $query->where(function ($streamQuery) use ($streamId) {
+                        $streamQuery->whereNull('stream_id')->orWhere('stream_id', $streamId);
+                    }))
+                    ->exists();
+
+                if (!$sectionMatches) {
+                    $validator->errors()->add(
+                        $prefix . 'section_id',
+                        'The selected section does not belong to the selected grade or stream.'
+                    );
+                }
+            }
+
+            if ($streamId) {
+                $streamMatches = DB::table('subjects')
+                    ->where('grade_id', $gradeId)
+                    ->where('stream_id', $streamId)
+                    ->exists();
+
+                if (!$streamMatches) {
+                    $validator->errors()->add(
+                        $prefix . 'stream_id',
+                        'The selected stream is not configured for the selected grade.'
+                    );
+                }
+            }
+        });
+    }
+
     private function scopeRules(int $subscriptionId): array
     {
         return [
-            'academic_year_id' => ['nullable', $this->ownedExists('academic_years', $subscriptionId)],
-            'grade_id' => ['required', $this->ownedExists('grades', $subscriptionId)],
-            'section_id' => ['nullable', $this->ownedExists('sections', $subscriptionId)],
-            'stream_id' => ['nullable', $this->ownedExists('streams', $subscriptionId)],
+            'academic_year_id' => ['nullable', 'integer', $this->ownedExists('academic_years', $subscriptionId)],
+            'grade_id' => ['required', 'integer', $this->sharedExists('grades')],
+            'section_id' => ['nullable', 'integer', $this->sharedExists('sections')],
+            'stream_id' => ['nullable', 'integer', $this->sharedExists('streams')],
         ];
     }
 
     private function itemRules(int $subscriptionId): array
     {
         return [
-            'subject_id' => ['required', $this->ownedExists('subjects', $subscriptionId)],
-            'preferred_teacher_id' => ['nullable', $this->ownedExists('users', $subscriptionId)],
+            'subject_id' => ['required', 'integer', $this->ownedExists('subjects', $subscriptionId)],
+            'preferred_teacher_id' => ['nullable', 'integer', $this->ownedExists('users', $subscriptionId)],
             'subject_category' => ['required', Rule::in(self::CATEGORIES)],
             'weekly_periods' => ['required', 'integer', 'min:0', 'max:60'],
             'max_periods_per_day' => ['required', 'integer', 'min:1', 'max:10'],
@@ -472,11 +534,16 @@ class SubjectPeriodAllocationController extends Controller
             ->where('stream_id', $streamId);
     }
 
-    private function ownedExists(string $table, int $subscriptionId)
+    private function ownedExists(string $table, int $subscriptionId): Rule
     {
         return Rule::exists($table, 'id')->where(
             fn ($query) => $query->where('subscription_id', $subscriptionId)
         );
+    }
+
+    private function sharedExists(string $table): Rule
+    {
+        return Rule::exists($table, 'id');
     }
 
     private function ensureOwned(SubjectPeriodAllocation $allocation): void
