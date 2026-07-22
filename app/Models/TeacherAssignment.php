@@ -11,6 +11,7 @@ class TeacherAssignment extends Model
 
     protected $fillable = [
         'subscription_id',
+        'academic_year_id',
         'teacher_id',
         'grade_id',
         'section_id',
@@ -28,6 +29,8 @@ class TeacherAssignment extends Model
     ];
 
     protected $casts = [
+        'academic_year_id' => 'integer',
+        'section_id' => 'integer',
         'is_active' => 'boolean',
         'is_primary_teacher' => 'boolean',
         'priority' => 'integer',
@@ -39,6 +42,11 @@ class TeacherAssignment extends Model
     public function teacher()
     {
         return $this->belongsTo(User::class, 'teacher_id');
+    }
+
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class);
     }
 
     public function grade()
