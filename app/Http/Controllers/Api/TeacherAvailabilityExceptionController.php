@@ -19,6 +19,7 @@ class TeacherAvailabilityExceptionController extends Controller
         $subscriptionId = $this->subscriptionId($request);
 
         $validated = $request->validate([
+            'academic_year_id' => ['nullable', ...$this->academicYearRules($subscriptionId)],
             'teacher_id' => ['nullable', ...$this->teacherRules($subscriptionId)],
             'status' => ['nullable', Rule::in(TeacherAvailabilityException::statuses())],
             'from_date' => ['nullable', 'date'],
@@ -29,6 +30,10 @@ class TeacherAvailabilityExceptionController extends Controller
         $query = TeacherAvailabilityException::query()
             ->with(['teacher', 'bell', 'academicYear'])
             ->where('subscription_id', $subscriptionId)
+            ->when(
+                isset($validated['academic_year_id']),
+                fn ($query) => $query->where('academic_year_id', (int) $validated['academic_year_id'])
+            )
             ->when(
                 isset($validated['teacher_id']),
                 fn ($query) => $query->where('teacher_id', (int) $validated['teacher_id'])
@@ -58,6 +63,7 @@ class TeacherAvailabilityExceptionController extends Controller
         $subscriptionId = $this->subscriptionId($request);
 
         $validated = $request->validate([
+            'academic_year_id' => ['nullable', ...$this->academicYearRules($subscriptionId)],
             'date' => ['nullable', 'date'],
         ]);
 
@@ -85,8 +91,12 @@ class TeacherAvailabilityExceptionController extends Controller
             ]);
 
         $exceptions = TeacherAvailabilityException::query()
-            ->with(['teacher', 'bell'])
+            ->with(['teacher', 'bell', 'academicYear'])
             ->where('subscription_id', $subscriptionId)
+            ->when(
+                isset($validated['academic_year_id']),
+                fn ($query) => $query->where('academic_year_id', (int) $validated['academic_year_id'])
+            )
             ->active()
             ->whereBetween('exception_date', [$weekStart, $weekEnd])
             ->ordered()
@@ -118,6 +128,7 @@ class TeacherAvailabilityExceptionController extends Controller
                     'start' => $weekStart,
                     'end' => $weekEnd,
                 ],
+                'academic_year_id' => $validated['academic_year_id'] ?? null,
             ],
         ]);
     }
@@ -220,15 +231,7 @@ class TeacherAvailabilityExceptionController extends Controller
     private function validatedData(Request $request, int $subscriptionId): array
     {
         return $request->validate([
-            'academic_year_id' => [
-                'nullable',
-                'integer',
-                Rule::exists('academic_years', 'id')->where(
-                    fn ($query) => $query
-                        ->where('subscription_id', $subscriptionId)
-                        ->where('is_active', true)
-                ),
-            ],
+            'academic_year_id' => $this->academicYearRules($subscriptionId),
             'teacher_id' => $this->teacherRules($subscriptionId),
             'exception_date' => ['required', 'date'],
             'weekday' => ['nullable', 'integer', 'between:1,7'],
@@ -254,6 +257,17 @@ class TeacherAvailabilityExceptionController extends Controller
             'valid_to' => ['nullable', 'date', 'after_or_equal:valid_from'],
             'is_active' => ['sometimes', 'boolean'],
         ]);
+    }
+
+    private function academicYearRules(int $subscriptionId): array
+    {
+        return [
+            'required',
+            'integer',
+            Rule::exists('academic_years', 'id')->where(
+                fn ($query) => $query->where('subscription_id', $subscriptionId)
+            ),
+        ];
     }
 
     private function teacherRules(int $subscriptionId): array
